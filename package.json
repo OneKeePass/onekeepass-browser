@@ -1,0 +1,23 @@
+{
+  "name": "onekeepass-browser-cljs",
+  "version": "1.1.0",
+  "private": true,
+  "devDependencies": {
+    "shadow-cljs": "3.3.3"
+  },
+  "scripts": {
+    "firefox": "rm -drf extension-dist/js  && cp browser-specific/firefox/manifest-firefox-v3.json extension-dist/manifest.json && cp browser-specific/firefox/background.html extension-dist/background.html",
+    "chrome": "rm -drf extension-dist/js && rm -f extension-dist/background.html && cp browser-specific/chrome/manifest-chrome-v3.json extension-dist/manifest.json"
+  },
+  "dependencies": {
+    "@emotion/cache": "^11.14.0",
+    "@emotion/react": "^11.14.0",
+    "@emotion/styled": "^11.14.1",
+    "@mui/icons-material": "^7.3.1",
+    "@mui/material": "^7.3.1",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "tweetnacl": "^1.0.3",
+    "tweetnacl-util": "^0.15.1"
+  }
+}

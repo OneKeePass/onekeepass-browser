@@ -1,0 +1,28 @@
+{
+    "extensionDescription": {
+        "message": "OneKeePass browser extension",
+        "description": "Name of the extension."
+    },
+
+    "connectedToApp": {
+        "message": "The browser extension is connected to the app",
+        "description": "Indicates that the extension is connected to the main installed OneKeePass app"
+    },
+
+    "noDbAvailable": {
+        "message": "Please open a browser connection enabled database and then try",
+        "description":"No database is yet opened"
+    },
+
+    "noMatchingEntry": {
+        "message":"No matching entry is found for this login url in any of the opened databases",
+        "description":"No matching entry is found for the url"
+    },
+
+    "appIsNotRunning": {
+        "message" : "There is no connection to the locally installed app. The app may not be running. Please start the app and then reconnect",
+        "description": "The main app should be running for the browser extension to work"
+    }
+
+    
+}

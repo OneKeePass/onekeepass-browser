@@ -1,0 +1,70 @@
+{
+  "description": "__MSG_extensionDescription__",
+  "manifest_version": 3,
+  "name": "OneKeePass-Browser",
+  "version": "1.1.0",
+  "default_locale": "en",
+  "homepage_url": "https://github.com/OneKeePass",
+  "icons": {
+    "16": "icons/onekeepass_16x16.png",
+    "48": "icons/onekeepass_48x48.png",
+    "64": "icons/onekeepass_64x64.png",
+    "96": "icons/onekeepass_96x96.png",
+    "128": "icons/onekeepass_128x128.png"
+  },
+  "background": {
+    "service_worker": "js/background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_icon": {
+      "16": "icons/onekeepass_16x16.png",
+      "18": "icons/onekeepass_18x18.png",
+      "19": "icons/onekeepass_19x19.png",
+      "32": "icons/onekeepass_32x32.png",
+      "36": "icons/onekeepass_36x36.png",
+      "48": "icons/onekeepass_48x48.png",
+      "64": "icons/onekeepass_64x64.png",
+      "96": "icons/onekeepass_96x96.png",
+      "128": "icons/onekeepass_128x128.png"
+    },
+    "default_title": "OneKeePass"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "content_main.js"
+      ],
+      "run_at": "document_idle",
+      "all_frames": true
+    }
+  ],
+  "permissions": [
+    "activeTab",
+    "nativeMessaging",
+    "webNavigation"
+  ],
+  "web_accessible_resources": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "resources": [
+        "js/content.js",
+        "js/shared.js",
+        "fonts/*",
+        "js/entry-list-popup.js",
+        "js/message-popup.js",
+        "entry_list_popup.html",
+        "main_popup.html",
+        "msg_popup.html"
+      ]
+    }
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+  }
+}

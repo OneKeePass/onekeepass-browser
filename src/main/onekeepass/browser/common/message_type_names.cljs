@@ -1,0 +1,69 @@
+(ns onekeepass.browser.common.message-type-names)
+
+
+;; Used as message types for the message send from content to background
+
+#_(def INPUT_ICON_CLICKED "INPUT_ICON_CLICKED")
+
+(def GET_ENTRY_LIST "Sends this message to get entry summaries for the url" "GET_ENTRY_LIST")
+
+(def CONTENT_SCRIPT_LOADING "CONTENT_SCRIPT_LOADING")
+
+(def CONTENT_LOGIN_FIELDS_IDENTIFIED "CONTENT_LOGIN_FIELDS_IDENTIFIED")
+
+(def ENTRY_SELECTED "The selected entry uuid is sent to get details" "ENTRY_SELECTED")
+
+(def START_ASSOCIATION "START_ASSOCIATION")
+
+
+;; Used as message types for the message send from background to content
+
+(def SHOW_ENTRY_LIST "SHOW_ENTRY_LIST")
+
+(def BACKGROUND_ERROR "BACKGROUND_ERROR")
+
+(def POPUP_ACTION "POPUP_ACTION")
+
+(def CONTENT_FRAME_ID "CONTENT_FRAME_ID")
+
+(def NO_BROWSER_ENABLED_DB "NO_BROWSER_ENABLED_DB")
+
+(def NO_MATCHING_ENTRIES "NO_MATCHING_ENTRIES")
+
+(def SELECTED_ENTRY_DETAIL "SELECTED_ENTRY_DETAIL")
+
+(def IFRAME_POPUP_ACTION_INITIATE "IFRAME_POPUP_ACTION_INITIATE")
+
+;;;;
+
+(def REDETECT_FIELDS "REDETECT_FIELDS")
+
+(def RECONNECT_APP "RECONNECT_APP")
+
+;; Message types for content <-> iframe communication
+(def CLOSE_POPUP "CLOSE_POPUP")
+
+(def CLOSE_ENTRY_LIST_POPUP "CLOSE_ENTRY_LIST_POPUP")
+
+(def RESIZE_IFRAME_ENTRY_LIST "RESIZE_IFRAME_ENTRY_LIST")
+
+(def RESIZE_IFRAME_MAIN_POPUP "RESIZE_IFRAME_MAIN_POPUP")
+
+(def RESIZE_IFRAME_MSG_POPUP "RESIZE_IFRAME_MSG_POPUP")
+
+(def INIT_PORT "INIT_PORT")
+
+(def MSG_BOX_MESSAGE "MSG_BOX_MESSAGE")
+
+
+;; Deprecate
+;; Messages from iframe to background
+
+(def LAUNCHING_POPUP "LAUNCHING_POPUP")
+
+(def CONNECTION_STATE_INFO "CONNECTION_STATE_INFO")
+
+
+
+
+
