@@ -10,7 +10,7 @@
   (when-let [host-element (j/call js/document :querySelector (str "." app-host-class))]
     ;; Remove the host element from the body, which also removes its shadow root
     (j/call host-element :remove)
-    (u/okp-println "Removed previous host-element of shadow root")
+    #_(u/okp-println "Removed previous host-element of shadow root")
     ;; You might also want to reset the flag on the input element
     ;; if you want to allow re-attachment later.
     ;; (j/assoc! input-element :cljsMuiAttached false)
@@ -27,7 +27,7 @@
 
 (defn show-popup-box-internal []
   (remove-host-element iframe-host-element-class)
-  (u/okp-println "The show-app-box is called ")
+  #_(u/okp-println "The show-app-box is called ")
   (let [host-element (js/document.createElement "div")
         shadow-root (.attachShadow host-element #js {:mode "closed"})
         src (js/chrome.runtime.getURL "entry_list_popup.html")
@@ -44,7 +44,7 @@
     ;; (j/assoc! style :height "300px")
     ;; (j/assoc! style :border "none")
 
-    (u/okp-console-log "iframe-element style src is "  (j/get-in iframe-element [:src]))
+    #_(u/okp-console-log "iframe-element style src is "  (j/get-in iframe-element [:src]))
 
     #_(okp-console-log "iframe-element style is " style)
 

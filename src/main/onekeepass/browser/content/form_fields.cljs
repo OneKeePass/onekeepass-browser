@@ -385,7 +385,7 @@
               ;; At least one of the relevant field should be visible to store
               (when (or user-field-found pwd-field-found)
 
-                (okp-println "Storing the identified page-info " page-info)
+                #_(okp-println "Storing the identified page-info " page-info)
 
                 (context/store-page-info page-info)
 

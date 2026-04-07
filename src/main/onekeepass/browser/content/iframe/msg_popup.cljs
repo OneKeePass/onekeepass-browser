@@ -32,13 +32,19 @@
    [mui-typography {:variant "body1" :color "error" :sx {}}
     error-message]])
 
+(defn- no-matching-passkeys-info []
+  [mui-stack {:sx {:text-align "center" :align-items "center"}}
+   [mui-typography {:variant "body1" :color "warning.dark" :sx {}}
+    "No saved passkeys found for this site in OneKeePass."]])
+
 (defn msg-box-main-content []
   (let [no-browser-enabled-db @(iframe-content-messaging/no-browser-enabled-db)
-        no-matching-entries @(iframe-content-messaging/no-matching-entries)
-        background-error  @(iframe-content-messaging/background-error)]
+        no-matching-entries   @(iframe-content-messaging/no-matching-entries)
+        no-matching-passkeys  @(iframe-content-messaging/no-matching-passkeys)
+        background-error      @(iframe-content-messaging/background-error)]
     ;; (u/okp-println "=== no-browser-enabled-db no-matching-entries background-error" no-browser-enabled-db no-matching-entries background-error)
 
-    (when (or no-browser-enabled-db no-matching-entries background-error)
+    (when (or no-browser-enabled-db no-matching-entries no-matching-passkeys background-error)
       [mui-box {:sx
                 {:bgcolor  "background.paper"
                  :border-color "black"
@@ -81,19 +87,18 @@
            no-matching-entries
            [no-matching-entries-info]
 
-           (not (nil? background-error))
-           [background-error-info background-error])]
+           no-matching-passkeys
+           [no-matching-passkeys-info]
 
-        ;; Footer part comes here if we need it
-        #_[mui-box {:component "footer" :sx {:bgcolor m/color-grey-200
-                                             :min-height 35}}]]])))
+           (not (nil? background-error))
+           [background-error-info background-error])]]])))
 
 
 
 
 (comment
   (defn msg-box-main-content []
-    (u/okp-println "=== msg-box-main-content is called..." @(iframe-content-messaging/no-browser-enabled-db))
+    #_(u/okp-println "=== msg-box-main-content is called..." @(iframe-content-messaging/no-browser-enabled-db))
 
     (let [no-browser-enabled-db @(iframe-content-messaging/no-browser-enabled-db)
           ;; no-matching-entries @(iframe-content-messaging/no-matching-entries)

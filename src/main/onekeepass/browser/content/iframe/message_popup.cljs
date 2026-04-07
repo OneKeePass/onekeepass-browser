@@ -238,7 +238,11 @@
        [m/mui-divider]
        [mui-stack {}
         [mui-stack {:direction "row" :spacing 2 :sx {:mr 1 :ml 1}}
-         #_[m/mui-icon-settings-outlined]
+         [m/mui-tooltip {:title "Settings" :enterDelay 1000}
+          [m/mui-icon-button
+           {:edge "start" :color "inherit"
+            :on-click (fn [] (iframe-content-messaging/send-show-settings-popup))}
+           [m/mui-icon-settings-outlined]]]
          ;; Using tootip resulted the following waring in page console
          ;; Warning: Failed prop type: Invalid prop `container` supplied to `ForwardRef`, expected one of type [function].
          [m/mui-tooltip {:title "Redetect" :enterDelay 1000}

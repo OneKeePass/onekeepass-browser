@@ -18,7 +18,7 @@
   (let [page-url (j/get-in js/window [:location :href])]
     #_(u/okp-println "store-page-info is called with page-info " page-info)
     (swap! page-data assoc :identified-page-info page-info :page-url page-url)
-    (u/okp-println "The page info data is set with " @page-data)))
+    #_(u/okp-println "The page info data is set with " @page-data)))
 
 (defn get-page-info []
   (@page-data :identified-page-info))

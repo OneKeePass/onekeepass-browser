@@ -3,19 +3,19 @@
    [onekeepass.browser.common.message-type-names :refer [BACKGROUND_ERROR
                                                          NO_BROWSER_ENABLED_DB
                                                          NO_MATCHING_ENTRIES
+                                                         NO_MATCHING_PASSKEYS
                                                          POPUP_ACTION
-                                                         IFRAME_POPUP_ACTION_INITIATE
                                                          REDETECT_FIELDS
                                                          SELECTED_ENTRY_DETAIL
-                                                         SHOW_ENTRY_LIST]]
-   [onekeepass.browser.common.utils :as u]
-   [onekeepass.browser.content.iframe.popup-host :as popup-host]
+                                                         SHOW_ENTRY_LIST
+                                                         SHOW_PASSKEY_CREATE_POPUP
+                                                         SHOW_PASSKEY_GROUPS
+                                                         SHOW_PASSKEY_LIST]]
+   [onekeepass.browser.common.utils :as u :refer [is-firefox-browser?]]
    [onekeepass.browser.content.events.messaging :as messaging-event]
-   [onekeepass.browser.content.events.popup]
-   ;;[onekeepass.browser.content.form-fields-2 :as form-fields]
+   [onekeepass.browser.content.events.popup] ;;[onekeepass.browser.content.form-fields-2 :as form-fields]
    [onekeepass.browser.content.form-fields :as form-fields]
-   [onekeepass.browser.content.inject.entry-list :as entry-list]
-   [onekeepass.browser.content.inject.message-popup :as message-box]
+   [onekeepass.browser.content.iframe.popup-host :as popup-host]
    [onekeepass.browser.content.mutation-tracking :as mt]))
 
 ;; https://github.com/applied-science/js-interop?tab=readme-ov-file
@@ -60,18 +60,27 @@
     REDETECT_FIELDS form-fields/identify-page
     
     SHOW_ENTRY_LIST popup-host/create-entry-list-popup
+    SHOW_PASSKEY_LIST popup-host/create-passkey-list-popup
+    SHOW_PASSKEY_CREATE_POPUP popup-host/create-passkey-create-popup
     SELECTED_ENTRY_DETAIL form-fields/fill-inputs
-    
+
     POPUP_ACTION popup-host/create-main-popup
     
     NO_BROWSER_ENABLED_DB popup-host/create-msg-popup
     NO_MATCHING_ENTRIES popup-host/create-msg-popup
-    
+    NO_MATCHING_PASSKEYS popup-host/create-msg-popup
+
     BACKGROUND_ERROR popup-host/create-msg-popup
+    
+    ;; SHOW_PASSKEY_GROUPS #(u/okp-println "SHOW_PASSKEY_GROUPS is clicked")
     
     ;; IFRAME_POPUP_ACTION_INITIATE popup-host/create-main-popup
     
     })
+
+  ;; Firefox only: relay OKP_PASSKEY_CREATE/GET window messages to the background
+  (when (is-firefox-browser?)
+    (messaging-event/register-firefox-passkey-relay))
 
   ;; Notify the background which uses this to record the frame-id of the content script
   (messaging-event/send-content-script-loading)

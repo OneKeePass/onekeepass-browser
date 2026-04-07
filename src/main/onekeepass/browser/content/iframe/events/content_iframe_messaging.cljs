@@ -6,10 +6,22 @@
   (:require
    [applied-science.js-interop :as j]
    [onekeepass.browser.common.message-type-names :refer [CLOSE_ENTRY_LIST_POPUP
+                                                         CLOSE_PASSKEY_CREATE_POPUP
                                                          CLOSE_POPUP
+                                                         CLOSE_SETTINGS_POPUP
                                                          ENTRY_SELECTED
+                                                         PASSKEY_CREATE_CANCELLED
+                                                         PASSKEY_CREATE_CONFIRMED
+                                                         PASSKEY_CREATE_FALLBACK
+                                                         PASSKEY_CREATE_SUCCESS
+                                                         PASSKEY_DB_CHOSEN
+                                                         PASSKEY_GROUP_CHOSEN
                                                          POPUP_ACTION
-                                                         SHOW_ENTRY_LIST]]
+                                                         SHOW_ENTRY_LIST
+                                                         SHOW_PASSKEY_CREATE_POPUP
+                                                         SHOW_PASSKEY_ENTRIES
+                                                         SHOW_PASSKEY_GROUPS
+                                                         SHOW_SETTINGS_POPUP]]
    [onekeepass.browser.common.utils :as u]
    [onekeepass.browser.content.iframe.events.content-iframe-connection :as content-iframe-conn]
    [re-frame.core :refer [dispatch reg-event-fx reg-fx]]))
@@ -82,6 +94,37 @@
       ENTRY_SELECTED
       (dispatch [:send-entry-selected (:db-key message-data) (:entry-uuid message-data)])
 
+      ;; Step 1: user picked a DB — relay to background to fetch groups
+      PASSKEY_DB_CHOSEN
+      (dispatch [:send-passkey-db-chosen (:db-key message-data)])
+
+      ;; Step 2: user picked/named a group — relay to background to fetch entries
+      PASSKEY_GROUP_CHOSEN
+      (dispatch [:send-passkey-group-chosen (:group-uuid message-data) (:new-group-name message-data)])
+
+      ;; Step 3: user confirmed — relay full create params to background
+      PASSKEY_CREATE_CONFIRMED
+      (dispatch [:send-passkey-create-confirmed (select-keys message-data [:db-key :group-uuid :new-group-name
+                                                                           :existing-entry-uuid :new-entry-name])])
+
+      PASSKEY_CREATE_CANCELLED
+      (do
+        (dispatch [:execute-iframe-message-type {:message-type CLOSE_PASSKEY_CREATE_POPUP}])
+        (dispatch [:send-passkey-create-cancelled]))
+
+      PASSKEY_CREATE_FALLBACK
+      (do
+        (dispatch [:execute-iframe-message-type {:message-type CLOSE_PASSKEY_CREATE_POPUP}])
+        (dispatch [:send-passkey-create-fallback]))
+
+      ;; Main popup requests settings popup to open
+      SHOW_SETTINGS_POPUP
+      (dispatch [:execute-iframe-message-type message-data])
+
+      ;; Settings popup requests itself to close
+      CLOSE_SETTINGS_POPUP
+      (dispatch [:execute-iframe-message-type message-data])
+
       ;;Else
       (u/okp-console-log "Unknown messsage received from iframe"))))
 
@@ -113,6 +156,26 @@
   []
   (dispatch [:content-iframe/matched-entries-loaded]))
 
+(defn send-passkey-create-data-message
+  "Called to send databases + rp-name to the passkey creation popup iframe after launch"
+  []
+  (dispatch [:content-iframe/passkey-create-data]))
+
+(defn send-passkey-groups-message
+  "Called to forward the group list (stored as :passkey-groups in content db) to the iframe"
+  []
+  (dispatch [:content-iframe/passkey-groups]))
+
+(defn send-passkey-entries-message
+  "Called to forward the entry list (stored as :passkey-entries in content db) to the iframe"
+  []
+  (dispatch [:content-iframe/passkey-entries]))
+
+(defn send-passkey-create-success-message
+  "Called to notify the iframe that the passkey was saved successfully"
+  []
+  (dispatch [:content-iframe/passkey-create-success]))
+
 (reg-event-fx
  :content-iframe/popup-action-message
  (fn [{:keys [db]} [_event_id]]
@@ -131,7 +194,8 @@
 (reg-event-fx
  :content-iframe/received-msg-box-message
  (fn [{:keys [db]} [_event-id]]
-   (let [message-data (select-keys db [:no-browser-enabled-db :no-matching-entries :no-matching-recent-url :background-error])
+   (let [message-data (select-keys db [:no-browser-enabled-db :no-matching-entries :no-matching-recent-url
+                                       :background-error :no-matching-passkeys])
          message-data (merge {:message-type "MSG_BOX_MESSAGE"} message-data)]
      {:fx [[:common/send-iframe-message-regfx message-data]]})))
 
@@ -143,6 +207,34 @@
          message-data (merge {:message-type SHOW_ENTRY_LIST} message-data)]
      #_(u/okp-println "Sending entries data of SHOW_ENTRY_LIST" message-data "to iframe")
      {:fx [[:common/send-iframe-message-regfx message-data]]})))
+
+;; SHOW_PASSKEY_CREATE_POPUP from bg -> content -> iframe
+(reg-event-fx
+ :content-iframe/passkey-create-data
+ (fn [{:keys [db]} [_event-id]]
+   (let [message-data (select-keys db [:passkey-create-data])
+         message-data (merge {:message-type SHOW_PASSKEY_CREATE_POPUP} message-data)]
+     {:fx [[:common/send-iframe-message-regfx message-data]]})))
+
+;; SHOW_PASSKEY_GROUPS from bg -> content -> iframe
+(reg-event-fx
+ :content-iframe/passkey-groups
+ (fn [{:keys [db]} [_event-id]]
+   (let [message-data (merge {:message-type SHOW_PASSKEY_GROUPS} (select-keys db [:passkey-groups]))]
+     {:fx [[:common/send-iframe-message-regfx message-data]]})))
+
+;; SHOW_PASSKEY_ENTRIES from bg -> content -> iframe
+(reg-event-fx
+ :content-iframe/passkey-entries
+ (fn [{:keys [db]} [_event-id]]
+   (let [message-data (merge {:message-type SHOW_PASSKEY_ENTRIES} (select-keys db [:passkey-entries]))]
+     {:fx [[:common/send-iframe-message-regfx message-data]]})))
+
+;; PASSKEY_CREATE_SUCCESS from bg -> content -> iframe
+(reg-event-fx
+ :content-iframe/passkey-create-success
+ (fn [{:keys [_db]} [_event-id]]
+   {:fx [[:common/send-iframe-message-regfx {:message-type PASSKEY_CREATE_SUCCESS}]]}))
 
 
 #_(reg-event-fx

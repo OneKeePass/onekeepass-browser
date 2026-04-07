@@ -73,7 +73,7 @@
   (when-let [host-element (j/call js/document :querySelector (str "." app-host-class))]
     ;; Remove the host element from the body, which also removes its shadow root
     (j/call host-element :remove)
-    (okp-println "Removed previous host-element of shadow root")))
+    #_(okp-println "Removed previous host-element of shadow root")))
 
 (defn host-element-by-class [app-host-class]
   (j/call js/document :querySelector (str "." app-host-class)))

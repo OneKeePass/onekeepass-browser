@@ -19,6 +19,22 @@
 (def SELECTED_ENTRY "SelectedEntry")
 (def DISCONNECT "DISCONNECT")
 
+;; ── Passkey request actions (extension → desktop) ────────────────────────────
+(def GET_OPENED_DATABASES_FOR_PASSKEY        "GetOpenedDatabasesForPasskey")
+(def GET_DB_GROUPS_FOR_PASSKEY               "GetDbGroupsForPasskey")
+(def GET_DB_GROUP_ENTRIES_FOR_PASSKEY        "GetDbGroupEntriesForPasskey")
+(def CREATE_PASSKEY                          "CreatePasskey")
+(def GET_PASSKEY_LIST                        "GetPasskeyList")
+(def COMPLETE_PASSKEY_ASSERTION              "CompletePasskeyAssertion")
+
+;; ── Passkey response actions (desktop → extension) ───────────────────────────
+(def OPENED_DATABASES_FOR_PASSKEY    "OpenedDatabasesForPasskey")
+(def DB_GROUPS_FOR_PASSKEY           "DbGroupsForPasskey")
+(def DB_GROUP_ENTRIES_FOR_PASSKEY    "DbGroupEntriesForPasskey")
+(def PASSKEY_CREATED                 "PasskeyCreated")
+(def PASSKEY_LIST                    "PasskeyList")
+(def PASSKEY_ASSERTION_COMPLETE      "PasskeyAssertionComplete")
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 

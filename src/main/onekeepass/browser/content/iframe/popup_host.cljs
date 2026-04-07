@@ -2,21 +2,36 @@
   (:require
    [applied-science.js-interop :as j]
    [onekeepass.browser.common.message-type-names :refer [CLOSE_ENTRY_LIST_POPUP
+                                                         CLOSE_PASSKEY_CREATE_POPUP
                                                          CLOSE_POPUP
+                                                         CLOSE_SETTINGS_POPUP
+                                                         PASSKEY_CREATE_SUCCESS
                                                          RESIZE_IFRAME_ENTRY_LIST
                                                          RESIZE_IFRAME_MAIN_POPUP
-                                                         RESIZE_IFRAME_MSG_POPUP]]
+                                                         RESIZE_IFRAME_MSG_POPUP
+                                                         RESIZE_IFRAME_PASSKEY_CREATE
+                                                         RESIZE_IFRAME_SETTINGS
+                                                         SHOW_PASSKEY_ENTRIES
+                                                         SHOW_PASSKEY_GROUPS
+                                                         SHOW_SETTINGS_POPUP]]
    [onekeepass.browser.common.utils :as u]
    [onekeepass.browser.content.context :as context]
    [onekeepass.browser.content.iframe.dragging-support :as dragging-support]
    [onekeepass.browser.content.iframe.events.content-iframe-messaging :as content-iframe-messaging]
-   [onekeepass.browser.content.inject.listener-store :as listener-store]))
+   [onekeepass.browser.content.inject.listener-store :as listener-store]
+   [re-frame.core :refer [dispatch]]))
 
 ;; Same as in onekeepass.browser.content.iframe.message-popup
 ;; Need to move to common
 (def ^:private POPUP_ACTION_BOX_WIDTH 400)
 
 (def ^:private ^:constant OKP_ENTRY_LIST_TAG_NAME  "okp-entry-list-element")
+
+(def ^:private ^:constant OKP_PASSKEY_LIST_TAG_NAME "okp-passkey-list-element")
+
+(def ^:private ^:constant OKP_PASSKEY_CREATE_TAG_NAME "okp-passkey-create-element")
+
+(def ^:private ^:constant OKP_SETTINGS_TAG_NAME "okp-settings-element")
 
 (def ^:private ^:constant OKP_DRAGGBLE_BOX_TAG_NAME  "okp-draggable-box-element")
 
@@ -44,6 +59,29 @@
 
 (defn- close-entry-list-popup []
   (remove-host-element-by-id (form-element-id OKP_ENTRY_LIST_TAG_NAME)))
+
+(defn- close-passkey-list-popup []
+  (remove-host-element-by-id (form-element-id OKP_PASSKEY_LIST_TAG_NAME)))
+
+(defn- cancel-passkey-list-popup
+  "Called when the user explicitly closes the passkey list popup via the × button.
+   Rejects the pending WebAuthn GET request before removing the popup."
+  []
+  (dispatch [:send-passkey-get-cancelled])
+  (close-passkey-list-popup))
+
+(defn- close-passkey-create-popup []
+  (remove-host-element-by-id (form-element-id OKP_PASSKEY_CREATE_TAG_NAME)))
+
+(defn- cancel-passkey-create-popup
+  "Called when the user explicitly closes the passkey create popup via the × button.
+   Rejects the pending WebAuthn CREATE request before removing the popup."
+  []
+  (dispatch [:send-passkey-create-cancelled])
+  (close-passkey-create-popup))
+
+(defn- close-settings-popup []
+  (remove-host-element-by-id (form-element-id OKP_SETTINGS_TAG_NAME)))
 
 (defn- create-close-button [on-close-fn]
   (let [btn (js/document.createElement "span")]
@@ -212,21 +250,7 @@
         width)
       stored-width)))
 
-(def ^:private last-body-height (atom {}))
-
-(defn- body-height
-  "Called to consider only the largest height seen so far"
-  [source height]
-  #_(u/okp-println "=== source height" source height "last-body-height" @last-body-height)
-  (let [stored-height (get @last-body-height source)
-        greater-height? (> height stored-height)]
-    (if greater-height?
-      (do
-        (swap! last-body-height assoc source height)
-        height)
-      stored-height)))
-
-(defn- adjust-width-height 
+(defn- adjust-width-height
   "Based on the iframe's body content's size changes, the launched Iframe's size is adjusted accordingly"
   [{:keys [source received-width received-height iframe-element handle-element] :as _data}]
   #_(u/okp-println "In adjust-width-height with data" data)
@@ -234,12 +258,10 @@
         width (body-width source received-width)
 
         ;;_ (u/okp-println "=== In adjust-width-height stored width" @last-body-width)
-        
-        ;; Use only the largest height when multiple height values are received
-        height (body-height source received-height)
 
-        ;;_ (u/okp-println "=== In adjust-width-height stored height" @last-body-height)
-        
+        ;; Use received-height directly so iframe can shrink when content becomes shorter
+        height received-height
+
         ;; Add a little buffer for the handle (30px) if measuring just body
         total-h (+ height 15)
         total-w width #_(+ w 15)]
@@ -280,6 +302,35 @@
                                                           :iframe-element iframe-element
                                                           :handle-element handle-element}))))))
 
+(defn remove-settings-popup []
+  (close-settings-popup))
+
+(defn create-settings-popup
+  "Launches the settings popup iframe (same dimensions as main popup).
+   Closes the main popup first so only the settings popup is visible."
+  [_args]
+  (close-main-popup)
+  (remove-host-element-by-id (form-element-id OKP_SETTINGS_TAG_NAME))
+  (let [{:keys [host-element iframe-element handle-element]}
+        (create-popup-internal {:iframe-src       "settings_popup.html"
+                                :tag-name         OKP_SETTINGS_TAG_NAME
+                                :box-width        POPUP_ACTION_BOX_WIDTH
+                                :box-height       330
+                                :close-popup      close-settings-popup
+                                :dragging-support true})]
+
+    (dragging-support/add-drag-support host-element iframe-element handle-element)
+
+    (iframe-resize-message-listener
+     {:iframe-element iframe-element
+      :handle-element handle-element
+      :message-type   RESIZE_IFRAME_SETTINGS})
+
+    (content-iframe-messaging/register-iframe-message-handlers
+     {CLOSE_SETTINGS_POPUP close-settings-popup})
+
+    (content-iframe-messaging/init-content-iframe-message-channel iframe-element)))
+
 (defn create-main-popup
   "Launches the iframe based main popup window when the content script receives the popup action message.
    This is fn is registred as a callback 
@@ -309,7 +360,8 @@
                                      :message-type RESIZE_IFRAME_MAIN_POPUP})
 
     ;; Message listener to receive close popup call
-    (content-iframe-messaging/register-iframe-message-handlers {CLOSE_POPUP close-main-popup})
+    (content-iframe-messaging/register-iframe-message-handlers {CLOSE_POPUP          close-main-popup
+                                                                SHOW_SETTINGS_POPUP  create-settings-popup})
 
     ;; Establishes the communication channel between content and the launched iframe
     (content-iframe-messaging/init-content-iframe-message-channel iframe-element)
@@ -349,7 +401,7 @@
 
 ;;;;;;;;;;;
 
-(defn- create-entry-list-popup-internal [{:keys [iframe-src tag-name host-left host-top width]}]
+(defn- create-entry-list-popup-internal [{:keys [iframe-src tag-name host-left host-top width dragging-support close-popup]}]
   (let [iframe-src (js/chrome.runtime.getURL iframe-src)
         ;; Here 'right' value is the px that determines the x coordinate of the popup from right
         ;; Looks like this is diffrent from viewport right as per the diagram in the pagehttps://developer.mozilla.org/en-US/docs/Web/API/Element/getBoundingClientRect
@@ -358,16 +410,21 @@
 
         host-element    (create-host-element tag-name {:left host-left :top host-top})
         iframe-element  (create-iframe {:src iframe-src :width width :height 100})
-
+        handle-element  (when dragging-support (create-drag-handle))
+        close-btn       (when dragging-support (create-close-button close-popup))
         shadow-root (.attachShadow host-element #js {:mode "closed"})]
+
+    (when dragging-support
+      (.appendChild handle-element close-btn)
+      (.appendChild shadow-root handle-element))
 
     (.appendChild shadow-root iframe-element)
     (.appendChild js/document.body host-element)
 
-
     #_(u/okp-println "2 Iframp popup: create-entry-list-popup-internal custom element for iframe created and appended")
 
-    {:host-element host-element
+    {:host-element   host-element
+     :handle-element handle-element
      :iframe-element iframe-element}))
 
 (defn- calculate-list-positions [input-element]
@@ -418,3 +475,68 @@
 
         ;; Need to send this message with matched entries data to the launched iframe which then shows the mui entry list
         (content-iframe-messaging/send-matched-entries-loaded-message)))))
+
+(defn create-passkey-list-popup
+  "Launches the passkey selection popup for the WebAuthn get (authentication) flow.
+   Unlike create-entry-list-popup, this does NOT require a focused input element;
+   it positions itself at a fixed screen location so it works during WebAuthn
+   interception where there may be no login form on the page."
+  []
+  (remove-host-element-by-id (form-element-id OKP_PASSKEY_LIST_TAG_NAME))
+  (let [{:keys [host-element iframe-element handle-element]}
+        (create-entry-list-popup-internal
+         {:iframe-src       "entry_list_popup.html"
+          :tag-name         OKP_PASSKEY_LIST_TAG_NAME
+          :host-left        20
+          :host-top         100
+          :width            420
+          :dragging-support true
+          :close-popup      cancel-passkey-list-popup})]
+
+    (reset! entry-list-popup-iframe-element-store iframe-element)
+
+    (dragging-support/add-drag-support host-element iframe-element handle-element)
+
+    (iframe-resize-message-listener
+     {:iframe-element iframe-element
+      :handle-element handle-element
+      :message-type   RESIZE_IFRAME_ENTRY_LIST})
+
+    (content-iframe-messaging/register-iframe-message-handlers
+     {CLOSE_ENTRY_LIST_POPUP close-passkey-list-popup})
+
+    (content-iframe-messaging/init-content-iframe-message-channel iframe-element)
+
+    ;; Sends the passkey entries (stored as :matched-entries in content db) to the iframe
+    (content-iframe-messaging/send-matched-entries-loaded-message)))
+
+(defn create-passkey-create-popup
+  "Launches the passkey creation popup for the WebAuthn create (registration) flow.
+   Draggable popup (matching main-popup style) with multi-step DB → Group → Entry form."
+  []
+  (remove-host-element-by-id (form-element-id OKP_PASSKEY_CREATE_TAG_NAME))
+  (let [{:keys [host-element iframe-element handle-element]}
+        (create-popup-internal {:iframe-src       "passkey_create_popup.html"
+                                :tag-name         OKP_PASSKEY_CREATE_TAG_NAME
+                                :box-width        POPUP_ACTION_BOX_WIDTH
+                                :close-popup      cancel-passkey-create-popup
+                                :dragging-support true})]
+
+    (dragging-support/add-drag-support host-element iframe-element handle-element)
+
+    (iframe-resize-message-listener
+     {:iframe-element iframe-element
+      :handle-element handle-element
+      :message-type   RESIZE_IFRAME_PASSKEY_CREATE})
+
+    (content-iframe-messaging/register-iframe-message-handlers
+     {CLOSE_POPUP                close-passkey-create-popup
+      CLOSE_PASSKEY_CREATE_POPUP close-passkey-create-popup
+      SHOW_PASSKEY_GROUPS        content-iframe-messaging/send-passkey-groups-message
+      SHOW_PASSKEY_ENTRIES       content-iframe-messaging/send-passkey-entries-message
+      PASSKEY_CREATE_SUCCESS     content-iframe-messaging/send-passkey-create-success-message})
+
+    (content-iframe-messaging/init-content-iframe-message-channel iframe-element)
+
+    ;; Sends databases + rp-name (stored as :passkey-create-data in content db) to the iframe
+    (content-iframe-messaging/send-passkey-create-data-message)))

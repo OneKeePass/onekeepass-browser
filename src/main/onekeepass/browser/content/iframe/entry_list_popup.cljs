@@ -182,7 +182,7 @@
 
   ;; Called when the compiled 'js/entry-list-popup.js' is called
   (defn init []
-    (u/okp-println "onekeepass.browser.content.iframe.entry-list-popup init is called")
+    #_(u/okp-println "onekeepass.browser.content.iframe.entry-list-popup init is called")
     (rd/render [main-comp] (.getElementById  ^js/Window js/document "app")))
 
 ;;;;;;;;;;;;;;;;;;;;

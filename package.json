@@ -6,7 +6,7 @@
     "shadow-cljs": "3.3.3"
   },
   "scripts": {
-    "firefox": "rm -drf extension-dist/js  && cp browser-specific/firefox/manifest-firefox-v3.json extension-dist/manifest.json && cp browser-specific/firefox/background.html extension-dist/background.html",
+    "firefox": "rm -drf extension-dist/js  && cp browser-specific/firefox/manifest-firefox-v3.json extension-dist/manifest.json && cp browser-specific/firefox/background.html extension-dist/background.html && cp browser-specific/firefox/passkey-intercept-main.js extension-dist/passkey-intercept-main.js",
     "chrome": "rm -drf extension-dist/js && rm -f extension-dist/background.html && cp browser-specific/chrome/manifest-chrome-v3.json extension-dist/manifest.json"
   },
   "dependencies": {

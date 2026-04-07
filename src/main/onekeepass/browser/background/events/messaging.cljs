@@ -4,11 +4,17 @@
    [clojure.string :as str]
    [onekeepass.browser.background.crypto :as cryto]
    [onekeepass.browser.background.events.common :as bg-cmn-event :refer [ASSOCIATE
+                                                                         DB_GROUP_ENTRIES_FOR_PASSKEY
+                                                                         DB_GROUPS_FOR_PASSKEY
                                                                          DISCONNECT
                                                                          ENABLED_DATABASE_MATCHED_ENTRY_LIST
                                                                          INIT_SESSION_KEY
                                                                          NATIVE_APP_ID
                                                                          NATIVE_APP_ID_DEV
+                                                                         OPENED_DATABASES_FOR_PASSKEY
+                                                                         PASSKEY_ASSERTION_COMPLETE
+                                                                         PASSKEY_CREATED
+                                                                         PASSKEY_LIST
                                                                          PROXY_APP_CONNECTION
                                                                          PROXY_ERROR
                                                                          SELECTED_ENTRY]]
@@ -22,6 +28,14 @@
                                                          ENTRY_SELECTED
                                                          GET_ENTRY_LIST
                                                          LAUNCHING_POPUP
+                                                         OKP_PASSKEY_CREATE
+                                                         OKP_PASSKEY_GET
+                                                         PASSKEY_CREATE_CANCELLED
+                                                         PASSKEY_CREATE_CONFIRMED
+                                                         PASSKEY_CREATE_FALLBACK
+                                                         PASSKEY_GET_CANCELLED
+                                                         PASSKEY_DB_CHOSEN
+                                                         PASSKEY_GROUP_CHOSEN
                                                          RECONNECT_APP
                                                          REDETECT_FIELDS
                                                          START_ASSOCIATION]]
@@ -99,11 +113,13 @@
        ;; As DISCONNECT action is called before the extension onDisconnect, this would have set 
        ;; NATIVE_APP_NOT_AVAILABLE before ':app-disconnected' call. In that case, we leave state in 'NATIVE_APP_NOT_AVAILABLE'
        {}
-       ;; All other cases
+       ;; All other cases — clear connection state and reset replay-protection counter
+       ;; so messages captured in the old session cannot be replayed into a new one
        {:db (-> db
                 (assoc :app-port nil)
                 (assoc :association-id nil)
-                (assoc-in [:app-connection :state] APP_DISCONNECTED))}))))
+                (assoc-in [:app-connection :state] APP_DISCONNECTED))
+        :fx [[:reset-recv-seq-regfx nil]]}))))
 
 (reg-event-fx
  :native-app-not-available
@@ -156,6 +172,16 @@
                                           :db-key db-key
                                           :entry-uuid entry-uuid} true]]]})))
 
+;; Routes an ENTRY_SELECTED message to either the passkey assertion flow or the
+;; normal password-fill flow, depending on whether a passkey get request is pending.
+(reg-event-fx
+ :route-entry-selected
+ (fn [{:keys [db]} [_event-id sender-info entry-info]]
+   (let [pending (get db :pending-webauthn)]
+     (if (and pending (= (:type pending) :get))
+       {:fx [[:dispatch [:passkey/entry-selected entry-info]]]}
+       {:fx [[:dispatch [:load-selected-entry-detail sender-info entry-info]]]}))))
+
 ;; Sends a request to the proxy app through the app-port by native messaging
 (reg-event-fx
  :send-app-request
@@ -178,11 +204,18 @@
                    request)]
          {:fx [[:post-message-regfx [(get-app-port db) req]]]})))))
 
-;; Called onetime when background script is intialized  
+;; Called onetime when background script is intialized
 (reg-fx
  :initiate-session-regfx
  (fn []
    (initiate-native-app-connection)))
+
+;; Resets the replay-protection receive counter in the crypto module.
+;; Called on disconnect so old-session messages cannot be replayed into a new session.
+(reg-fx
+ :reset-recv-seq-regfx
+ (fn [_]
+   (cryto/reset-recv-seq!)))
 
 ;; Calls the proxy app to send a payload to the proxy app and then to the main app
 (reg-fx
@@ -212,14 +245,16 @@
    (let [connection-state (get-in db [:app-connection :state])]
      (if (= connection-state PROXY_TO_APP_CONNECTED)
        ;; We send this message only if the native app is connected
-       {:fx [[:dispatch [:send-app-request {:action ASSOCIATE :client-id (get-browser-name)}]]]}
+       {:fx [[:dispatch [:send-app-request {:action ASSOCIATE
+                                            :client-id (get-browser-name)
+                                            :extension-id js/chrome.runtime.id}]]]}
        {:fx [[:dispatch [:popup/app-is-not-connected]]]}))))
 
 ;; Proxy returns an ok association message
 (reg-event-fx
  :on-associate-ok-response
  (fn [{:keys [db]} [_event-id {:keys [association-id app-version]}]]
-   (u/okp-println "Association reply returns app-version" app-version)
+   #_(u/okp-println "Association reply returns app-version" app-version)
    (let [next-msg {:action INIT_SESSION_KEY
                    :association-id  association-id
                    :client-session-pub-key (cryto/encoded-client-public-key)}]
@@ -293,8 +328,17 @@
   [{:keys [action nonce message-content _request-id] :as ok-resp}]
   ;; The app response is expected to have a field "message" which is typically a encrypted json str
   ;; TODO: Is there any time non json string is passed in "message"
-  (let [message-content (if (and  message-content nonce)
-                          (bg-cmn-event/parse-json-str->map (cryto/decrypt message-content nonce))
+  ;; Passkey credential responses must have their JSON field names preserved
+  ;; exactly as Chrome expects (rawId, clientDataJSON, etc.). Parsing through
+  ;; parse-json-str->map would convert them to kebab-case and break the names.
+  (let [raw-passkey-credential? (#{PASSKEY_CREATED PASSKEY_ASSERTION_COMPLETE} action)
+        message-content (if (and message-content nonce)
+                          (let [decrypted (cryto/decrypt message-content nonce)]
+                            ;; decrypted is nil when replay protection rejects the message
+                            (when decrypted
+                              (if raw-passkey-credential?
+                                decrypted
+                                (bg-cmn-event/parse-json-str->map decrypted))))
                           message-content)
         ;; expected that message-content is a cljs map
         ok-resp (if-not (nil? message-content)
@@ -333,6 +377,32 @@
       ;; The disconnect message from proxy. The proxy is exits after sending this message so onDiscoonect is also called
       DISCONNECT
       (dispatch [:native-app-not-available])
+
+      ;; ── Passkey responses ────────────────────────────────────────────────────
+
+      ;; List of open databases returned before a passkey creation
+      OPENED_DATABASES_FOR_PASSKEY
+      (dispatch [:passkey/databases-received ok-resp])
+
+      ;; Group list for a chosen database
+      DB_GROUPS_FOR_PASSKEY
+      (dispatch [:passkey/groups-received ok-resp])
+
+      ;; Entry list for a chosen group
+      DB_GROUP_ENTRIES_FOR_PASSKEY
+      (dispatch [:passkey/entries-received ok-resp])
+
+      ;; Passkey registration complete — credential JSON is in message-content
+      PASSKEY_CREATED
+      (dispatch [:passkey/created ok-resp])
+
+      ;; Matching passkeys for a site's get request
+      PASSKEY_LIST
+      (dispatch [:passkey/list-received ok-resp])
+
+      ;; Assertion signed — result JSON is in message-content
+      PASSKEY_ASSERTION_COMPLETE
+      (dispatch [:passkey/assertion-complete ok-resp])
 
       (u/okp-println "Unknown ok response received from app" ok-resp))))
 
@@ -516,13 +586,68 @@
          RECONNECT_APP
          (app-reconnect sender-info)
 
-         ;; Background gets this message from content script to get the basic entry info from the main app
+         ;; Background gets this message from content script to get the basic entry info from the main app.
+         ;; Route to passkey flow if a passkey assertion is pending; otherwise normal password flow.
          ENTRY_SELECTED
-         (dispatch [:load-selected-entry-detail sender-info (select-keys message-data [:db-key :entry-uuid])])
+         (dispatch [:route-entry-selected sender-info (select-keys message-data [:db-key :entry-uuid])])
 
          REDETECT_FIELDS
          (dispatch [:common/send-message-to-current-tab
                     {:message-type REDETECT_FIELDS}])
+
+         ;; Firefox passkey relay — content script forwards these from the MAIN world
+         OKP_PASSKEY_CREATE
+         (let [rp-name (let [opts (js->clj (.parse js/JSON (:options-json message-data)) :keywordize-keys true)]
+                         (or (get-in opts [:rp :name])
+                             (get-in opts [:rp :id])
+                             "Passkey"))]
+           (dispatch [:passkey/create-request
+                      {:chrome-request-id (:request-id message-data)
+                       :options-json      (:options-json message-data)
+                       :rp-name           rp-name
+                       :origin            (or (:origin message-data) "")
+                       :tab-url           (or (:tab-url sender-info) "")
+                       :tab-id            (:tab-id sender-info)
+                       :platform          :firefox}]))
+
+         OKP_PASSKEY_GET
+         (dispatch [:passkey/get-request
+                    {:chrome-request-id (:request-id message-data)
+                     :options-json      (:options-json message-data)
+                     :origin            (or (:origin message-data) "")
+                     :tab-url           (or (:tab-url sender-info) "")
+                     :tab-id            (:tab-id sender-info)
+                     :platform          :firefox}])
+
+         ;; User picked a database in step 1 — fetch that DB's groups
+         PASSKEY_DB_CHOSEN
+         (dispatch [:passkey/db-chosen {:db-key (:db-key message-data)}])
+
+         ;; User picked (or named) a group in step 2 — fetch entries or emit empty list
+         PASSKEY_GROUP_CHOSEN
+         (dispatch [:passkey/group-chosen {:group-uuid     (:group-uuid message-data)
+                                           :new-group-name (:new-group-name message-data)}])
+
+         ;; User confirmed in step 3 — forward all params to create the passkey
+         PASSKEY_CREATE_CONFIRMED
+         (dispatch [:passkey/db-selected-for-create
+                    {:db-key              (:db-key message-data)
+                     :group-uuid          (:group-uuid message-data)
+                     :new-group-name      (:new-group-name message-data)
+                     :existing-entry-uuid (:existing-entry-uuid message-data)
+                     :new-entry-name      (:new-entry-name message-data)}])
+
+         ;; User cancelled the passkey creation popup — reject the pending request
+         PASSKEY_CREATE_CANCELLED
+         (dispatch [:passkey/create-cancelled])
+
+         ;; User dismissed the passkey list popup via × — reject the pending GET request
+         PASSKEY_GET_CANCELLED
+         (dispatch [:passkey/get-cancelled])
+
+         ;; User chose "Use Browser Default" — detach proxy then reject
+         PASSKEY_CREATE_FALLBACK
+         (dispatch [:passkey/create-fallback])
 
          LAUNCHING_POPUP
          (do
@@ -530,5 +655,5 @@
            (dispatch [:iframe/popup-connection-info-response send-response])
            true)
 
-         ;;Else 
+         ;;Else
          (js/console.error "Unhandled message object " message-data))))))

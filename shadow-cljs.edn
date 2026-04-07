@@ -35,6 +35,18 @@
 
     :message-popup
     {:init-fn onekeepass.browser.content.iframe.message-popup/init
+     :depends-on #{:shared}}
+
+    ;; :passkey-intercept
+    ;; {:init-fn onekeepass.browser.content.passkey-intercept/init
+    ;;  :depends-on #{:shared}}
+
+    :passkey-create-popup
+    {:init-fn onekeepass.browser.content.iframe.passkey-create-popup/init
+     :depends-on #{:shared}}
+
+    :settings-popup
+    {:init-fn onekeepass.browser.content.iframe.settings-popup/init
      :depends-on #{:shared}}}
 
    ;; Here is some production config

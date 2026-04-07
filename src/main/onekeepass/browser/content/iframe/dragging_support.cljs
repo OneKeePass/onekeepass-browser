@@ -128,7 +128,7 @@
 
   (defn handle-drag-start [host-element mouse-event]
 
-    (u/okp-println "handle-drag-start is called with drag-state" @drag-state "and popup-start-postion" @popup-start-postion)
+    #_(u/okp-println "handle-drag-start is called with drag-state" @drag-state "and popup-start-postion" @popup-start-postion)
 
 
     (let [rect (j/call host-element :getBoundingClientRect)

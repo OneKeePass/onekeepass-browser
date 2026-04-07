@@ -27,26 +27,87 @@
 (defn okp-console-log [& args]
   (apply js/console.log (cons "okp:" args)))
 
-;; TODO: Need to check this logic in other browsers
 (defn get-browser-name []
-  (cond
-    (exists? js/browser)
-    "Firefox"
+  (let [ua (.-userAgent js/navigator)
+        chromium? (exists? (.-userAgentData js/navigator))
+        br-name     (cond
+                      ;; navigator.userAgentData is Chromium-only; Firefox does not implement it.
+                      ;; Distinguish specific Chromium browsers via navigator.brave or UA string.
+                      (and chromium? (exists? (.-brave js/navigator)))
+                      "Brave"
 
-    (and (exists? js/chrome) (exists? (.-brave js/navigator)))
-    "Brave"
+                      (and chromium? (.includes ua "Edg/"))
+                      "Edge"
 
-    (and (exists? js/chrome) (.includes (.-userAgent js/navigator) "Edg/"))
-    "Edge"
+                      (and chromium? (.includes ua "OPR"))
+                      "Opera"
 
-    (and (exists? js/chrome) (.includes (.-userAgent js/navigator) "OPR"))
-    "Opera"
+                      chromium?
+                      "Chrome"
 
-    (exists? js/chrome)
-    "Chrome"
+                      ;; Firefox: no userAgentData, and UA contains "Firefox".
+                      ;; js/browser and js/chrome are no longer reliable — both now exist in Chrome 146+.
+                      (.includes ua "Firefox")
+                      "Firefox"
 
-    :else
-    "Unknown"))
+                      :else
+                      "Unknown")]
+    (okp-println "Browser identified as" br-name)
+    br-name))
+
+;; alternate possible implemetation 
+#_(defn get-browser-name []
+    (let [ua (.-userAgent js/navigator)
+          ua-data (.-userAgentData js/navigator)
+          chromium? (some? ua-data)
+          brands (when ua-data
+                   (map #(.-brand %) (js->clj (.-brands ua-data) :keywordize-keys false)))
+
+          has-brand? (fn [name]
+                       (some #(= % name) brands))
+
+          includes? (fn [s]
+                      (.includes ua s))]
+
+      (cond
+        ;; Brave exposes navigator.brave even when UA brands look like Chrome
+        (exists? (.-brave js/navigator))
+        "Brave"
+
+        ;; Edge
+        (or (has-brand? "Microsoft Edge")
+            (includes? "Edg/"))
+        "Edge"
+
+        ;; Opera
+        (or (has-brand? "Opera")
+            (includes? "OPR/"))
+        "Opera"
+
+        ;; Arc currently identifies as Chrome in brands, but UA contains Arc
+        (includes? "Arc/")
+        "Arc"
+
+        ;; Firefox has no userAgentData
+        (includes? "Firefox/")
+        "Firefox"
+
+        ;; Safari must exclude Chromium browsers
+        (and (includes? "Safari/")
+             (not (includes? "Chrome/"))
+             (not (includes? "Chromium/"))
+             (not (includes? "Edg/"))
+             (not (includes? "OPR/")))
+        "Safari"
+
+        ;; Chrome / Chromium family fallback
+        (or (has-brand? "Google Chrome")
+            (has-brand? "Chromium")
+            chromium?)
+        "Chrome"
+
+        :else
+        "Unknown")))
 
 (defn is-firefox-browser? []
   (= (get-browser-name) "Firefox"))

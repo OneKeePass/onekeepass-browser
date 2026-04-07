@@ -16,7 +16,7 @@
 (reg-event-fx
  :iframe-popup-action/message-received
  (fn [{:keys [db]} [_event_id {:keys [connection-state association-id association-rejected]}]]
-   (u/okp-println "The connection-state is " connection-state " association-id " association-id)
+   #_(u/okp-println "The connection-state is " connection-state " association-id " association-id)
    #_(let [existing-connection-state (get-in db [:connection-state])]
        (okp-println "existing-connection-state is " existing-connection-state))
 

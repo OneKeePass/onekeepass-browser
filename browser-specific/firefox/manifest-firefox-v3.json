@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "OneKeePass-Browser",
   "description": "__MSG_extensionDescription__",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "homepage_url": "https://github.com/OneKeePass",
   "default_locale": "en",
   "author": "OneKeePass Team",
@@ -40,7 +40,18 @@
   "content_scripts": [
     {
       "matches": [
-        "<all_urls>"
+        "https://*/*"
+      ],
+      "js": [
+        "passkey-intercept-main.js"
+      ],
+      "run_at": "document_start",
+      "world": "MAIN",
+      "all_frames": true
+    },
+    {
+      "matches": [
+        "https://*/*"
       ],
       "js": [
         "content_main.js"
@@ -63,8 +74,7 @@
     "webRequestBlocking"
   ],
   "host_permissions": [
-    "https://*/*",
-    "http://*/*"
+    "https://*/*"
   ],
   "web_accessible_resources": [
     {
@@ -77,13 +87,17 @@
         "js/content.js",
         "js/entry-list-popup.js",
         "js/message-popup.js",
+        "js/passkey-create-popup.js",
+        "js/settings-popup.js",
         "entry_list_popup.html",
         "main_popup.html",
-        "msg_popup.html"
+        "msg_popup.html",
+        "passkey_create_popup.html",
+        "settings_popup.html"
       ]
     }
   ],
   "content_security_policy": {
-    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+    "extension_pages": "script-src 'self'; object-src 'self'"
   }
 }

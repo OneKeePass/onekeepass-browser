@@ -34,7 +34,44 @@
 
 (def IFRAME_POPUP_ACTION_INITIATE "IFRAME_POPUP_ACTION_INITIATE")
 
+;; Passkey (WebAuthn) message types — background <-> content
+(def SHOW_PASSKEY_LIST "SHOW_PASSKEY_LIST")
+
+(def NO_MATCHING_PASSKEYS "NO_MATCHING_PASSKEYS")
+
+;; Passkey creation popup — background -> content -> iframe -> content -> background
+(def SHOW_PASSKEY_CREATE_POPUP "SHOW_PASSKEY_CREATE_POPUP")
+(def CLOSE_PASSKEY_CREATE_POPUP "CLOSE_PASSKEY_CREATE_POPUP")
+(def RESIZE_IFRAME_PASSKEY_CREATE "RESIZE_IFRAME_PASSKEY_CREATE")
+(def PASSKEY_CREATE_CONFIRMED "PASSKEY_CREATE_CONFIRMED")
+(def PASSKEY_CREATE_CANCELLED "PASSKEY_CREATE_CANCELLED")
+(def PASSKEY_CREATE_FALLBACK  "PASSKEY_CREATE_FALLBACK")
+(def PASSKEY_GET_CANCELLED    "PASSKEY_GET_CANCELLED")    ;; content→bg: user dismissed passkey-list popup via × button  ;; iframe→content→bg: detach proxy + reject, fall back to browser default
+
+;; Passkey creation multi-step flow — DB → Group → Entry
+(def PASSKEY_DB_CHOSEN      "PASSKEY_DB_CHOSEN")      ;; iframe→content→bg: DB selected, fetch groups
+(def SHOW_PASSKEY_GROUPS    "SHOW_PASSKEY_GROUPS")    ;; bg→content→iframe: group list for chosen DB
+(def PASSKEY_GROUP_CHOSEN   "PASSKEY_GROUP_CHOSEN")   ;; iframe→content→bg: group selected, fetch entries
+(def SHOW_PASSKEY_ENTRIES   "SHOW_PASSKEY_ENTRIES")   ;; bg→content→iframe: entry list for chosen group
+(def PASSKEY_CREATE_SUCCESS "PASSKEY_CREATE_SUCCESS") ;; bg→content→iframe: passkey saved successfully
+
+;; Firefox passkey relay — MAIN world <-> isolated world <-> background
+;; MAIN world → isolated world → background (via window.postMessage then chrome.runtime.sendMessage)
+(def OKP_PASSKEY_CREATE "OKP_PASSKEY_CREATE")
+(def OKP_PASSKEY_GET "OKP_PASSKEY_GET")
+;; background → isolated world → MAIN world (via tabs.sendMessage then window.postMessage)
+(def OKP_PASSKEY_RESOLVE_CREATE "OKP_PASSKEY_RESOLVE_CREATE")
+(def OKP_PASSKEY_RESOLVE_GET "OKP_PASSKEY_RESOLVE_GET")
+(def OKP_PASSKEY_REJECT "OKP_PASSKEY_REJECT")
+;; background → isolated world → MAIN world: delegate the pending request to the original navigator.credentials.create()
+(def OKP_PASSKEY_BROWSER_DEFAULT "OKP_PASSKEY_BROWSER_DEFAULT")
+
 ;;;;
+
+;; Settings popup message types — main popup iframe → content → popup-host
+(def SHOW_SETTINGS_POPUP "SHOW_SETTINGS_POPUP")
+(def CLOSE_SETTINGS_POPUP "CLOSE_SETTINGS_POPUP")
+(def RESIZE_IFRAME_SETTINGS "RESIZE_IFRAME_SETTINGS")
 
 (def REDETECT_FIELDS "REDETECT_FIELDS")
 
