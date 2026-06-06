@@ -17,6 +17,8 @@
 (def ASSOCIATE "Associate")
 (def ENABLED_DATABASE_MATCHED_ENTRY_LIST "EnabledDatabaseMatchedEntryList")
 (def SELECTED_ENTRY "SelectedEntry")
+(def GET_CUSTOM_ICON_ACTION "GetCustomIcon")
+(def CUSTOM_ICON "CustomIcon")
 (def DISCONNECT "DISCONNECT")
 
 ;; ── Passkey request actions (extension → desktop) ────────────────────────────

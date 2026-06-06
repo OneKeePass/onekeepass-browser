@@ -9,7 +9,9 @@
                                                          CLOSE_PASSKEY_CREATE_POPUP
                                                          CLOSE_POPUP
                                                          CLOSE_SETTINGS_POPUP
+                                                         CUSTOM_ICON_LOADED
                                                          ENTRY_SELECTED
+                                                         GET_CUSTOM_ICON
                                                          PASSKEY_CREATE_CANCELLED
                                                          PASSKEY_CREATE_CONFIRMED
                                                          PASSKEY_CREATE_FALLBACK
@@ -82,7 +84,7 @@
   [message]
 
   (let [{:keys [message-type] :as message-data} (convert-message message)]
-    #_(u/okp-println "Message from iframe" message-data)
+    (u/okp-println "Message from iframe in content" message-data)
     (condp = message-type
 
       CLOSE_POPUP
@@ -93,6 +95,9 @@
       
       ENTRY_SELECTED
       (dispatch [:send-entry-selected (:db-key message-data) (:entry-uuid message-data)])
+
+      GET_CUSTOM_ICON
+      (dispatch [:send-get-custom-icon (:db-key message-data) (:custom-icon-uuid message-data)])
 
       ;; Step 1: user picked a DB — relay to background to fetch groups
       PASSKEY_DB_CHOSEN
@@ -126,7 +131,7 @@
       (dispatch [:execute-iframe-message-type message-data])
 
       ;;Else
-      (u/okp-console-log "Unknown messsage received from iframe"))))
+      (u/okp-console-log "Unknown messsage received from iframe in content:" message-type))))
 
 
 (defn init-content-iframe-message-channel 
@@ -155,6 +160,9 @@
   "Called to send the matched entries data from content script to iframe after the launch of the 'entry_list_popup.html' iframe"
   []
   (dispatch [:content-iframe/matched-entries-loaded]))
+
+(defn send-custom-icon-loaded-message [message-data]
+  (dispatch [:content-iframe/custom-icon-loaded message-data]))
 
 (defn send-passkey-create-data-message
   "Called to send databases + rp-name to the passkey creation popup iframe after launch"
@@ -207,6 +215,11 @@
          message-data (merge {:message-type SHOW_ENTRY_LIST} message-data)]
      #_(u/okp-println "Sending entries data of SHOW_ENTRY_LIST" message-data "to iframe")
      {:fx [[:common/send-iframe-message-regfx message-data]]})))
+
+(reg-event-fx
+ :content-iframe/custom-icon-loaded
+ (fn [{:keys [_db]} [_event-id message-data]]
+   {:fx [[:common/send-iframe-message-regfx message-data]]}))
 
 ;; SHOW_PASSKEY_CREATE_POPUP from bg -> content -> iframe
 (reg-event-fx

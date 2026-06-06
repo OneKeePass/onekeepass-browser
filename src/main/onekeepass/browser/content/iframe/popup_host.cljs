@@ -5,6 +5,7 @@
                                                          CLOSE_PASSKEY_CREATE_POPUP
                                                          CLOSE_POPUP
                                                          CLOSE_SETTINGS_POPUP
+                                                         CUSTOM_ICON_LOADED
                                                          PASSKEY_CREATE_SUCCESS
                                                          RESIZE_IFRAME_ENTRY_LIST
                                                          RESIZE_IFRAME_MAIN_POPUP
@@ -468,7 +469,9 @@
         (iframe-resize-message-listener {:iframe-element iframe-element :message-type RESIZE_IFRAME_ENTRY_LIST})
 
         ;; Message listener to receive close popup call
-        (content-iframe-messaging/register-iframe-message-handlers {CLOSE_ENTRY_LIST_POPUP close-entry-list-popup})
+        (content-iframe-messaging/register-iframe-message-handlers
+         {CLOSE_ENTRY_LIST_POPUP close-entry-list-popup
+          CUSTOM_ICON_LOADED content-iframe-messaging/send-custom-icon-loaded-message})
 
         ;; Establishes the communication channel between content and the launched iframe
         (content-iframe-messaging/init-content-iframe-message-channel iframe-element)
@@ -503,7 +506,8 @@
       :message-type   RESIZE_IFRAME_ENTRY_LIST})
 
     (content-iframe-messaging/register-iframe-message-handlers
-     {CLOSE_ENTRY_LIST_POPUP close-passkey-list-popup})
+     {CLOSE_ENTRY_LIST_POPUP close-passkey-list-popup
+      CUSTOM_ICON_LOADED content-iframe-messaging/send-custom-icon-loaded-message})
 
     (content-iframe-messaging/init-content-iframe-message-channel iframe-element)
 

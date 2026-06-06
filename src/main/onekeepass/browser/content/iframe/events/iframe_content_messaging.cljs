@@ -8,7 +8,9 @@
    [onekeepass.browser.common.message-type-names :refer [CLOSE_ENTRY_LIST_POPUP
                                                          CLOSE_POPUP
                                                          CLOSE_SETTINGS_POPUP
+                                                         CUSTOM_ICON_LOADED
                                                          ENTRY_SELECTED
+                                                         GET_CUSTOM_ICON
                                                          MSG_BOX_MESSAGE
                                                          PASSKEY_CREATE_CANCELLED
                                                          PASSKEY_CREATE_CONFIRMED
@@ -27,15 +29,17 @@
                                                          START_ASSOCIATION]]
    [onekeepass.browser.common.utils :as u]
    [onekeepass.browser.content.iframe.events.iframe-content-connection :as iframe-content-conn]
+   [onekeepass.browser.content.inject.db-icons :as db-icons]
    [re-frame.core :refer [dispatch reg-event-fx reg-sub subscribe]]))
 
 
 (defn- content-message-handler
   "This is used in iframe to handle the message received from content scripts"
   [message]
-  #_(u/okp-console-log "Content message receiced" message)
-  #_(u/okp-println "Message converted" (js->clj (j/get-in message [:data]) :keywordize-keys true))
-  #_(u/okp-println "Message converted" (js->clj message :keywordize-keys true) (js/Object.keys message) (js->clj (j/get-in message [:data]) :keywordize-keys true))
+  #_(u/okp-console-log "Content message receiced(js):" message)
+  #_(u/okp-println "Content message receiced in iframe and js->clj message" (js->clj (j/get-in message [:data]) :keywordize-keys true))
+  
+  #_(u/okp-println "Content message receiced in iframe and converted" (js->clj message :keywordize-keys true) (js/Object.keys message) (js->clj (j/get-in message [:data]) :keywordize-keys true))
 
   ;; The simple js->clj works here
   (let [{:keys [message-type] :as message-data} (js->clj (j/get-in message [:data]) :keywordize-keys true)]
@@ -49,6 +53,9 @@
 
       SHOW_ENTRY_LIST
       (dispatch [:iframe-matched-entries-loaded message-data])
+
+      CUSTOM_ICON_LOADED
+      (db-icons/cache-custom-icon! message-data)
 
       SHOW_PASSKEY_CREATE_POPUP
       (dispatch [:iframe-passkey-create/message-received message-data])
@@ -93,6 +100,12 @@
   (iframe-content-conn/send-message-to-content {:message-type ENTRY_SELECTED
                                                 :db-key db-key
                                                 :entry-uuid entry-uuid}))
+
+(defn send-get-custom-icon [db-key custom-icon-uuid]
+  (u/okp-println "Sending from content to iframe GET_CUSTOM_ICON message")
+  (iframe-content-conn/send-message-to-content {:message-type GET_CUSTOM_ICON
+                                                :db-key db-key
+                                                :custom-icon-uuid custom-icon-uuid}))
 
 (defn send-passkey-create-confirmed
   "Called from passkey creation popup iframe when user clicks 'Save Passkey'.
@@ -316,4 +329,3 @@
 
 (defn passkey-create-success? []
   (subscribe [:iframe-passkey-create-success]))
-

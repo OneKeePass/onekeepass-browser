@@ -8,6 +8,8 @@
                                                                          DB_GROUPS_FOR_PASSKEY
                                                                          DISCONNECT
                                                                          ENABLED_DATABASE_MATCHED_ENTRY_LIST
+                                                                         CUSTOM_ICON
+                                                                         GET_CUSTOM_ICON_ACTION
                                                                          INIT_SESSION_KEY
                                                                          NATIVE_APP_ID
                                                                          NATIVE_APP_ID_DEV
@@ -25,7 +27,9 @@
                                                         PROXY_TO_APP_NOT_CONNECTED]]
    [onekeepass.browser.common.message-type-names :refer [CONTENT_LOGIN_FIELDS_IDENTIFIED
                                                          CONTENT_SCRIPT_LOADING
+                                                         CUSTOM_ICON_LOADED
                                                          ENTRY_SELECTED
+                                                         GET_CUSTOM_ICON
                                                          GET_ENTRY_LIST
                                                          LAUNCHING_POPUP
                                                          OKP_PASSKEY_CREATE
@@ -65,6 +69,11 @@
     (not (boolean @(subscribe [:app-port]))))
 
 (declare initiate-native-app-connection)
+
+(defonce ^:private custom-icon-cache (atom {}))
+
+(defn- custom-icon-cache-key [db-key custom-icon-uuid]
+  (str db-key ":" custom-icon-uuid))
 
 ;; Called onetime when background script is intialized 'app-port' will be set after this call
 (reg-event-fx
@@ -171,6 +180,43 @@
                                           :request-id request-id
                                           :db-key db-key
                                           :entry-uuid entry-uuid} true]]]})))
+
+(reg-event-fx
+ :get-custom-icon
+ (fn [{:keys [db]} [_event-id {:keys [tab-id frame-id]} {:keys [db-key custom-icon-uuid]}]]
+   (let [cache-key (custom-icon-cache-key db-key custom-icon-uuid)]
+     (if-some [icon-data (get @custom-icon-cache cache-key)]
+       {:fx [[:common/send-content-message-regfx {:tab-id tab-id
+                                                  :frame-id frame-id
+                                                  :message-data (merge {:message-type CUSTOM_ICON_LOADED
+                                                                        :db-key db-key}
+                                                                       icon-data)}]]}
+       (let [request-id (bg-cmn-event/generate-request-id)]
+         {:db (-> db (assoc-in [:reques-ids request-id] {:tab-id tab-id
+                                                         :frame-id frame-id
+                                                         :db-key db-key
+                                                         :custom-icon-uuid custom-icon-uuid
+                                                         :cache-key cache-key}))
+          :fx [[:dispatch [:send-app-request {:action GET_CUSTOM_ICON_ACTION
+                                              :request-id request-id
+                                              :db-key db-key
+                                              :custom-icon-uuid custom-icon-uuid} true]]]})))))
+
+(reg-event-fx
+ :custom-icon-loaded
+ (fn [{:keys [db]} [_event-id {:keys [message-content request-id]}]]
+   (let [{:keys [tab-id frame-id db-key cache-key]} (get-in db [:reques-ids request-id])
+         db (if (nil? tab-id) db (update-in db [:reques-ids] dissoc request-id))
+         icon-data (assoc message-content :db-key db-key)]
+     (when (and cache-key message-content)
+       (swap! custom-icon-cache assoc cache-key icon-data))
+     (if (nil? tab-id)
+       {:db db}
+       {:db db
+        :fx [[:common/send-content-message-regfx {:tab-id tab-id
+                                                  :frame-id frame-id
+                                                  :message-data (assoc icon-data
+                                                                       :message-type CUSTOM_ICON_LOADED)}]]}))))
 
 ;; Routes an ENTRY_SELECTED message to either the passkey assertion flow or the
 ;; normal password-fill flow, depending on whether a passkey get request is pending.
@@ -372,6 +418,9 @@
       ;; The app has returned the basic details of the selected entry
       SELECTED_ENTRY
       (dispatch [:content/basic-entry-info-loaded ok-resp #_(:message-content ok-resp)])
+
+      CUSTOM_ICON
+      (dispatch [:custom-icon-loaded ok-resp])
 
       ;; This is sent when user disables a particular browser in the Main App's browser integration settingss
       ;; The disconnect message from proxy. The proxy is exits after sending this message so onDiscoonect is also called
@@ -577,6 +626,9 @@
          GET_ENTRY_LIST
          (dispatch [:get-entry-list sender-info])
 
+         GET_CUSTOM_ICON
+         (dispatch [:get-custom-icon sender-info (select-keys message-data [:db-key :custom-icon-uuid])])
+
          CONTENT_SCRIPT_LOADING
          (received-content-loading sender)
 
@@ -656,4 +708,4 @@
            true)
 
          ;;Else
-         (js/console.error "Unhandled message object " message-data))))))
+         (u/okp-console-error "Unhandled message object " message-data))))))

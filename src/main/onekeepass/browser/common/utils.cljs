@@ -27,6 +27,9 @@
 (defn okp-console-log [& args]
   (apply js/console.log (cons "okp:" args)))
 
+(defn okp-console-error [& args]
+  (apply js/console.error (cons "okp:" args)))
+
 (defn get-browser-name []
   (let [ua (.-userAgent js/navigator)
         chromium? (exists? (.-userAgentData js/navigator))

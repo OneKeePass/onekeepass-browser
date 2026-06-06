@@ -1,7 +1,31 @@
 (ns onekeepass.browser.content.inject.db-icons
   (:require [onekeepass.browser.common.mui-components
              :as m
-             :refer [mui-box mui-svg-icon mui-icon-vpn-key-outlined]]))
+             :refer [mui-box mui-svg-icon mui-icon-vpn-key-outlined]]
+            [reagent.core :as r]
+            [onekeepass.browser.common.utils :as u]))
+
+(defonce ^:private custom-icon-cache (r/atom {}))
+(defonce ^:private pending-custom-icon-requests (atom #{}))
+
+(defn- custom-icon-cache-key [db-key custom-icon-uuid]
+  (str db-key ":" custom-icon-uuid))
+
+(defn cache-custom-icon! [{:keys [db-key custom-icon-uuid data-base-64 data-base64 mime-type]}]
+  (let [data-base64 (or data-base64 data-base-64)]
+    (when (and db-key custom-icon-uuid data-base64)
+    (let [cache-key (custom-icon-cache-key db-key custom-icon-uuid)]
+      (swap! custom-icon-cache assoc cache-key
+             {:data-base64 data-base64
+              :mime-type (or mime-type "image/png")})
+      (swap! pending-custom-icon-requests disj cache-key)))))
+
+(defn- request-custom-icon-once! [cache-key request-custom-icon]
+  (u/okp-println "In request-custom-icon-once!...")
+  (when (and request-custom-icon
+             (not (contains? @pending-custom-icon-requests cache-key)))
+    (swap! pending-custom-icon-requests conj cache-key)
+    (request-custom-icon)))
 
 (def ^:private all-icons {0
                           [mui-svg-icon {:xmlns:dc "http://purl.org/dc/elements/1.1/" :xmlns:cc "http://creativecommons.org/ns#" :xmlns:rdf "http://www.w3.org/1999/02/22-rdf-syntax-ns#" :xmlns:svg "http://www.w3.org/2000/svg" :xmlns "http://www.w3.org/2000/svg" :id "svg10" :enable-background "new 0 0 48 48" :viewBox "0 0 48 48" :version "1"}
@@ -755,3 +779,44 @@
     [mui-box {:sx {"& svg" {:width "1.25em" :height "1.25em"}} ;; & svg sets additional style of child <svg> under this box(div)
               :display "flex" :alignItems "center"}            ;; Aligns the icon to the center of box
      (get all-icons index [mui-icon-vpn-key-outlined])]))
+
+(defn render-entry-icon
+  "Renders a custom PNG icon from the local cache. Missing custom icons show a
+   neutral placeholder while the caller-supplied request function lazy-loads
+   the data through the background script."
+  [{:keys [db-key icon-id custom-icon-uuid custom-icons request-custom-icon]}]
+  
+  (u/okp-println "render-entry-icon is called ")
+  (let [cache-key (when (and db-key (seq custom-icon-uuid))
+                    (custom-icon-cache-key db-key custom-icon-uuid))
+        cached-icon (when cache-key (get @custom-icon-cache cache-key))
+        legacy-b64 (and (seq custom-icon-uuid)
+                        (get custom-icons custom-icon-uuid))]
+    (cond
+      cached-icon
+      [mui-box {:sx {:display "flex" :alignItems "center"
+                     :width "1.25em" :height "1.25em"}}
+       [:img {:src (str "data:" (:mime-type cached-icon) ";base64," (:data-base64 cached-icon))
+              :style {:width "100%" :height "100%" :object-fit "contain"}}]]
+
+      legacy-b64
+      [mui-box {:sx {:display "flex" :alignItems "center"
+                     :width "1.25em" :height "1.25em"}}
+       [:img {:src (str "data:image/png;base64," legacy-b64)
+              :style {:width "100%" :height "100%" :object-fit "contain"}}]]
+
+      (seq custom-icon-uuid)
+      (do
+        (request-custom-icon-once! cache-key request-custom-icon)
+        [mui-box {:sx {:display "flex"
+                       :alignItems "center"
+                       :justifyContent "center"
+                       :width "1.25em"
+                       :height "1.25em"
+                       :borderRadius "4px"
+                       :bgcolor "action.hover"}}
+         [mui-icon-vpn-key-outlined {:sx {:fontSize "1em"
+                                          :color "action.disabled"}}]])
+
+      :else
+      [entry-icon icon-id])))

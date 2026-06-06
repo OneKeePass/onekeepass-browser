@@ -4,7 +4,9 @@
                                                          CONTENT_FRAME_ID
                                                          CONTENT_LOGIN_FIELDS_IDENTIFIED
                                                          CONTENT_SCRIPT_LOADING
+                                                         CUSTOM_ICON_LOADED
                                                          ENTRY_SELECTED
+                                                         GET_CUSTOM_ICON
                                                          GET_ENTRY_LIST
                                                          IFRAME_POPUP_ACTION_INITIATE
                                                          NO_BROWSER_ENABLED_DB
@@ -35,6 +37,7 @@
                                                          START_ASSOCIATION]]
    [onekeepass.browser.common.utils :as u :refer [okp-println]]
    [onekeepass.browser.content.events.common :as cmn-event]
+   [onekeepass.browser.content.inject.db-icons :as db-icons]
    [re-frame.core :refer [dispatch reg-event-fx reg-fx reg-sub subscribe]]))
 
 
@@ -95,6 +98,9 @@
 
          SELECTED_ENTRY_DETAIL
          (dispatch [:received-seleted-entry-basic-info message-data])
+
+         CUSTOM_ICON_LOADED
+         (dispatch [:received-custom-icon-loaded message-data])
 
          ;; Receives any error happened on the background script
          ;; The 'dispatch' event in turn calls the previously registered error handler
@@ -207,6 +213,9 @@
                                               :db-key db-key
                                               :entry-uuid entry-uuid})))
 
+(defn send-get-custom-icon [db-key custom-icon-uuid]
+  (dispatch [:send-get-custom-icon db-key custom-icon-uuid]))
+
 (defn send-content-script-loading
   []
   #_(okp-println "send-content-script-loading is called ... ")
@@ -283,6 +292,13 @@
     :fx [[:common/send-bg-message-regfx {:message-type ENTRY_SELECTED
                                          :db-key db-key
                                          :entry-uuid entry-uuid}]]}))
+
+(reg-event-fx
+ :send-get-custom-icon
+ (fn [{:keys [_db]} [_event-id db-key custom-icon-uuid]]
+   {:fx [[:common/send-bg-message-regfx {:message-type GET_CUSTOM_ICON
+                                         :db-key db-key
+                                         :custom-icon-uuid custom-icon-uuid}]]}))
 
 ;; Stores passkey-create-data in app-db and calls the registered SHOW_PASSKEY_CREATE_POPUP handler
 (reg-event-fx
@@ -431,6 +447,12 @@
    {;; :db (-> db (assoc :seleted-entry-basic-info basic-entry-info))
     :fx [[:execute-message-handler-regfx [(get-in db [:message-handlers message-type]) basic-entry-info]]]}))
 
+(reg-event-fx
+ :received-custom-icon-loaded
+ (fn [{:keys [db]} [_event-id {:keys [message-type] :as message-data}]]
+   (db-icons/cache-custom-icon! message-data)
+   {:fx [[:execute-message-handler-regfx [(get-in db [:iframe-message-handlers message-type]) message-data]]]}))
+
 ;; Not yet used
 
 ;; The content script calls the background script to do some action and 
@@ -473,7 +495,8 @@
 
    ;; args is an optional map to pass any arguments to the handler
    ;; The structure of this map is specific to the handler
-   (handler args)))
+   (when handler
+     (handler args))))
 
 (reg-sub
  :no-browser-enabled-db

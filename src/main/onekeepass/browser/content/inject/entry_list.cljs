@@ -37,11 +37,11 @@
                     "& ul" {:padding 0}}
                :subheader (r/as-element [:li])}
      (doall
-      (for [{:keys [db-name db-key entry-summaries]} non-empty-matched-entries]
+      (for [{:keys [db-name db-key entry-summaries custom-icons]} non-empty-matched-entries]
         ^{:key db-name} [:li
                          [:ul {}
                           [mui-list-subheader {:sx {:background-color "rgba(25, 118, 210, 0.08)"}} [mui-typography {:variant "h6"} db-name]]
-                          (for [{:keys [uuid title secondary-title icon-id]} entry-summaries]
+                          (for [{:keys [uuid title secondary-title icon-id custom-icon-uuid]} entry-summaries]
                             ^{:key uuid} [mui-list-item {;; :divider true
                                                          :button "true"
                                                          :value uuid
@@ -53,7 +53,12 @@
                                                          ;; :secondaryAction (when (= @selected-id (:uuid item)) (r/as-element [mui-icon-button {:edge "end"} [mui-icon-more-vert]]))
                                                          }
                                           [mui-list-item-avatar
-                                           [mui-avatar [entry-icon icon-id]]]
+                                           [mui-avatar [db-icons/render-entry-icon
+                                                        {:db-key db-key
+                                                         :icon-id icon-id
+                                                         :custom-icon-uuid custom-icon-uuid
+                                                         :custom-icons custom-icons
+                                                         :request-custom-icon #(messaging-event/send-get-custom-icon db-key custom-icon-uuid)}]]]
                                           [mui-list-item-text
                                            {:primary title
                                             :secondary  secondary-title}]])]]))]))
@@ -170,4 +175,3 @@
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;  iframe based ;;;;;;;;;;;;;;;;
-
