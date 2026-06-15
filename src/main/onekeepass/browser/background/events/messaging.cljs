@@ -42,7 +42,9 @@
                                                          PASSKEY_GROUP_CHOSEN
                                                          RECONNECT_APP
                                                          REDETECT_FIELDS
-                                                         START_ASSOCIATION]]
+                                                         START_ASSOCIATION
+                                                         TOGGLE_SITE_DISABLED]]
+   [onekeepass.browser.common.site-matching :as site-matching]
    [onekeepass.browser.common.utils :as u :refer [get-browser-name
                                                   is-firefox-browser?
                                                   okp-console-log]]
@@ -78,13 +80,15 @@
 ;; Called onetime when background script is intialized 'app-port' will be set after this call
 (reg-event-fx
  :start-app-session
- (fn [{:keys [db]} [_event-id]]
+ (fn [{:keys [db]} [_event-id show-error-on-failure?]]
    (let [app-port (get-app-port db)]
      ;; app-port is not nil, should we close and reinitiate the connection?
      ;;  (when (nil? app-port)
      ;;    (initiate-native-app-connection))
      (if (nil? app-port)
-       {:fx [[:initiate-session-regfx]]}
+       {:db (-> db
+                (assoc-in [:app-connection :show-error-on-next-proxy-failure] (boolean show-error-on-failure?)))
+        :fx [[:initiate-session-regfx]]}
        {}))))
 
 ;; The app-port is stored for later use
@@ -93,7 +97,9 @@
  (fn [{:keys [db]} [_event-id app-port]]
    ;;  (println "App is connected and the app port is " app-port)
    {:db (-> db (assoc :app-port app-port)
-            (assoc-in [:app-connection :state] APP_CONNECTED))}))
+            (assoc-in [:app-connection :state] APP_CONNECTED)
+            (assoc-in [:app-connection :show-error-on-next-proxy-failure] false))
+    :fx [[:connection-badge-regfx true]]}))
 
 ;; Called from runtime app port disconnected event
 #_(reg-event-fx
@@ -128,7 +134,8 @@
                 (assoc :app-port nil)
                 (assoc :association-id nil)
                 (assoc-in [:app-connection :state] APP_DISCONNECTED))
-        :fx [[:reset-recv-seq-regfx nil]]}))))
+        :fx [[:reset-recv-seq-regfx nil]
+             [:connection-badge-regfx false]]}))))
 
 (reg-event-fx
  :native-app-not-available
@@ -137,7 +144,27 @@
    {:db (-> db
             (assoc :app-port nil)
             (assoc :association-id nil)
-            (assoc-in [:app-connection :state] NATIVE_APP_NOT_AVAILABLE))}))
+            (assoc-in [:app-connection :state] NATIVE_APP_NOT_AVAILABLE))
+    :fx [[:connection-badge-regfx false]]}))
+
+;; Reflects the native app connection state on the extension toolbar icon. When the app
+;; is not connected we show a small badge and a tooltip so the disconnected state is
+;; visible at a glance (the login field popup no longer prompts to connect on every
+;; field). The badge is cleared when the app connects.
+(reg-fx
+ :connection-badge-regfx
+ (fn [connected?]
+   (if connected?
+     (do
+       (js/chrome.action.setBadgeText #js {:text ""})
+       (js/chrome.action.setTitle #js {:title "OneKeePass"}))
+     (do
+       ;; (js/chrome.action.setBadgeText #js {:text "!"})
+       ;; (js/chrome.action.setBadgeBackgroundColor #js {:color "#9E9E9E"})
+       (js/chrome.action.setBadgeText #js {:text "X"})
+       (js/chrome.action.setBadgeBackgroundColor #js {:color "#aa3535"})
+       (js/chrome.action.setTitle
+        #js {:title "OneKeePass — app not connected (click the field icon to connect)"})))))
 
 #_(reg-event-fx
    :browser-connection-diabled
@@ -149,23 +176,68 @@
                 (assoc :association-id nil)
                 (assoc-in [:app-connection :state] NATIVE_APP_NOT_AVAILABLE))})))
 
-(defn- form-url-to-match [tab-url]
-  (let [u (js/URL.  tab-url)
-        port (.-port u)
-        port (if (str/blank? port) nil (str ":" port))]
-    (str/join "" [(.-protocol u) "//" (.-host u) port (.-pathname u)])))
+(defn- form-url-to-match
+  "Builds the url used by the app to match entries from the browser tab url.
+   Returns the origin only (scheme + host + optional non-default port), dropping
+   the path, query string and fragment. Falls back to the raw tab-url when it
+   cannot be parsed (e.g a non standard scheme or a blank url).
+
+   Interim measure: the core matcher (url_matched) compares scheme + host + exact
+   path. Sending the origin (path normalises to '/') makes matching effectively
+   scheme + host, so an entry whose stored URL is the bare domain matches, and
+   login flows on a different host/path (e.g OAuth redirect urls like
+   signin.costco.com/<transient-path>) become matchable by adding the stable
+   login origin to the entry's 'Additional URLs'. Once core relaxes the path
+   requirement,restore the scheme + host + path version commented below."
+  [tab-url]
+  (try
+    (.-origin (js/URL. tab-url))
+    (catch :default _e
+      tab-url)))
+
+;; Previous implementation: scheme + hostname + optional non-default port + path
+;; (query and fragment dropped). Kept for when core's url_matched is relaxed so
+;; the path can be sent again as a soft/specific signal.
+#_(defn- form-url-to-match
+    [tab-url]
+    (try
+      (let [u (js/URL. tab-url)
+            ;; URL.hostname excludes the port whereas URL.host includes it. Use
+            ;; hostname and add the port ourselves so a url with an explicit port
+            ;; does not end up with the port doubled (host already had it).
+            port (.-port u)
+            port (if (str/blank? port) "" (str ":" port))]
+        (str/join "" [(.-protocol u) "//" (.-hostname u) port (.-pathname u)]))
+      (catch :default _e
+        tab-url)))
 
 (reg-event-fx
  :get-entry-list
- (fn [{:keys [db]} [_event-id {:keys [tab-id frame-id tab-url _frame-url] :as _sender-info}]]
-   #_(u/okp-println "Form url formed is" (form-url-to-match tab-url))
+ (fn [{:keys [db]} [_event-id {:keys [tab-id frame-id tab-url frame-url user-initiated] :as _sender-info}]]
+   (u/okp-println "Form url formed is" (form-url-to-match tab-url) "from tab-url" tab-url)
    #_(u/okp-println "get-entry-list form-url " form-url " tab-id " tab-id " frame-id " frame-id)
    (let [request-id (bg-cmn-event/generate-request-id)
-         association-id (get db :association-id)]
-     (if (nil? association-id)
+         association-id (get db :association-id)
+         app-port (get-app-port db)]
+     (cond
+       ;; App not connected and this was an automatic (focus/typing) request — stay silent.
+       ;; The login field icon remains as the cue; the user can click it to bring up the
+       ;; connect dialog on demand, instead of being prompted on every login field.
+       ;; User-initiated requests (icon click) fall through and prompt to connect as before.
+       (and (nil? app-port) (not user-initiated))
+       {}
+
+       (nil? association-id)
        {:fx [[:dispatch [:send-assoc-message]]]}
+
+       :else
        ;; Need to remove request-id stored after use
-       {:db (-> db (assoc-in [:reques-ids request-id] {:tab-id tab-id :frame-id frame-id}))
+       ;; tab-url (top page) and frame-url (the login-field frame the credential
+       ;; will be typed into) are kept so the entry-list popup can show the
+       ;; fill-target origin (#6). They are equal for top-frame logins and differ
+       ;; for cross-origin sub-frame logins.
+       {:db (-> db (assoc-in [:reques-ids request-id] {:tab-id tab-id :frame-id frame-id
+                                                       :tab-url tab-url :frame-url frame-url}))
         :fx [[:dispatch [:send-app-request {:action ENABLED_DATABASE_MATCHED_ENTRY_LIST
                                             :request-id request-id
                                             ;; The form-url from tab-url instead of frame-url is used by the app to match the entries
@@ -174,7 +246,14 @@
 (reg-event-fx
  :load-selected-entry-detail
  (fn [{:keys [db]} [_event-id {:keys [tab-id frame-id]} {:keys [db-key entry-uuid]}]]
-   (let [request-id (bg-cmn-event/generate-request-id)]
+   (let [request-id (bg-cmn-event/generate-request-id)
+         ;; The fill (SELECTED_ENTRY_DETAIL) must target the frame that holds the login
+         ;; fields. When the popup is rendered in the main frame (login fields are in a
+         ;; sub-frame, e.g Charles schwab), the ENTRY_SELECTED sender frame-id is the
+         ;; main frame (0), not the input's frame. Prefer the recorded login-field-frame
+         ;; so the fill reaches the actual input; fall back to the sender frame-id.
+         login-field-frame (get-in db [:tabs tab-id :login-field-frame])
+         frame-id (or login-field-frame frame-id)]
      {:db (-> db (assoc-in [:reques-ids request-id] {:tab-id tab-id :frame-id frame-id}))
       :fx [[:dispatch [:send-app-request {:action SELECTED_ENTRY
                                           :request-id request-id
@@ -333,8 +412,12 @@
    (u/okp-println "Received error response" error-resp)
    (cond
      (= action PROXY_APP_CONNECTION)
-     {:db (-> db (assoc-in [:app-connection :state] PROXY_TO_APP_NOT_CONNECTED))
-      :fx [[:dispatch  [:common/send-error-message-to-current-tab {:error-message error-message} true]]]}
+     (let [show-error? (get-in db [:app-connection :show-error-on-next-proxy-failure])]
+       (cond-> {:db (-> db
+                        (assoc-in [:app-connection :state] PROXY_TO_APP_NOT_CONNECTED)
+                        (assoc-in [:app-connection :show-error-on-next-proxy-failure] false))}
+         show-error?
+         (assoc :fx [[:dispatch  [:common/send-error-message-to-current-tab {:error-message error-message} true]]])))
 
      (and  (= action ASSOCIATE)
            (= error-message "ASSOCIATION_REJECTED"))
@@ -561,7 +644,7 @@
      :frame-id frameId
      :frame-url url}))
 
-(defn- received-content-loading [sender]
+(defn- received-content-loading [sender send-response]
   (let [{:keys [url frameId tab]} (j/lookup sender)
         tab-id (j/get tab :id)
         tab-url (j/get tab :url)]
@@ -570,11 +653,26 @@
     ;; Stores the info in app-db for later use
     (dispatch [:content/loading-initiated {:tab-id tab-id :tab-url tab-url :frame-id frameId}])
 
+    ;; Responds whether the user has disabled this site so the content script can
+    ;; skip all login-detection work. The check uses the top-level tab url, so the
+    ;; content scripts of cross origin sub-frames inside a disabled page are gated too.
+    ;; The settings are read from storage directly (not from app-db) so a fresh
+    ;; MV3 service worker answers correctly even before its init's settings load lands
+    (-> (js/chrome.storage.local.get "okp-settings")
+        (.then (fn [result]
+                 (let [raw (j/get result :okp-settings)
+                       settings (if raw (js->clj raw :keywordize-keys true) {})
+                       disabled? (site-matching/site-disabled? tab-url (get settings :disabled-sites))]
+                   (send-response #js {:site-disabled disabled?}))))
+        (.catch (fn [_e]
+                  ;; Fail open - the content script treats no/false response as enabled
+                  (send-response #js {:site-disabled false}))))
+
     ;; Sends this frame-id to the content script so that each frame's content script knows its frame-id
     ;; This is only way the content script injected to various frames know their frame-id
-    ;; Frame id 0 is top-level browsing context, not in a nested <iframe>. 
+    ;; Frame id 0 is top-level browsing context, not in a nested <iframe>.
     ;; A positive value indicates that navigation happens in a nested iframe.
-    ;; Frame IDs are unique for a given tab and process   
+    ;; Frame IDs are unique for a given tab and process
     #_(message-to-tab tab-id {:message-type CONTENT_FRAME_ID :frame-id frameId} frameId)))
 
 (defn- login-fields-identified [sender _args]
@@ -586,7 +684,7 @@
     (dispatch [:content/login-fields-identified {:tab-id tab-id :tab-url tab-url :frame-id frameId}])))
 
 (defn- app-reconnect [{:keys [tab-id]}]
-  (dispatch [:start-app-session])
+  (dispatch [:start-app-session true])
 
   ;; We cannot use js/window in background script (though it worked in firefox, an error was thrown in chrome) as it is not available
   ;; TODO: In content script side we need to wait for some time using js/window.setTimeout there
@@ -624,13 +722,17 @@
          ;; Background gets this message from content script to get the all entries of all opened databases
          ;; that match the tab url from the main app
          GET_ENTRY_LIST
-         (dispatch [:get-entry-list sender-info])
+         (dispatch [:get-entry-list (assoc sender-info :user-initiated (boolean (:user-initiated message-data)))])
 
          GET_CUSTOM_ICON
          (dispatch [:get-custom-icon sender-info (select-keys message-data [:db-key :custom-icon-uuid])])
 
          CONTENT_SCRIPT_LOADING
-         (received-content-loading sender)
+         ;; Returning true keeps the message channel open for the async
+         ;; send-response call (site-disabled check reads storage)
+         (do
+           (received-content-loading sender send-response)
+           true)
 
          CONTENT_LOGIN_FIELDS_IDENTIFIED
          (login-fields-identified sender (:fields-info message-data))
@@ -700,6 +802,15 @@
          ;; User chose "Use Browser Default" — detach proxy then reject
          PASSKEY_CREATE_FALLBACK
          (dispatch [:passkey/create-fallback])
+
+         ;; Main popup iframe asks to add/remove the current site in the
+         ;; disabled-sites list. The iframe is embedded in the page, so the
+         ;; sender's tab is the hosting tab - used to reload it after the toggle
+         TOGGLE_SITE_DISABLED
+         (dispatch [:settings/toggle-site-disabled
+                    (-> message-data
+                        (select-keys [:host :include-subdomains :disable?])
+                        (assoc :tab-id (:tab-id sender-info)))])
 
          LAUNCHING_POPUP
          (do

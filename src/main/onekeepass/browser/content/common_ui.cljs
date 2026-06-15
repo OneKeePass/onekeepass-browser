@@ -132,3 +132,26 @@
    ;; the default method is 'get'
    :method (j/get form :method)
    :name (j/get form :name)})
+
+;; document.activeElement retargets to the outermost shadow host, not the element
+;; actually focused inside (possibly nested) shadow DOM. e.g on hbomax the input
+;; lives several open shadow roots deep under <gi-login>, so document.activeElement
+;; returns <gi-login>, not the <input>. Descend through each shadow root's own
+;; activeElement to reach the real focused element. Each level may itself be the
+;; host of a nested shadow root, so we loop until there is no deeper active element.
+;;
+;; Boundaries this intentionally does NOT cross:
+;;  - Closed shadow roots: .shadowRoot is nil, so the walk stops at the host. This
+;;    is fine - get-all-input-elements cannot enter a closed root either, so such
+;;    an input is never detected/stored, and we never reach the anchor step.
+;;  - Iframes: a focused field inside an <iframe> makes the top document's
+;;    activeElement the <iframe> element. We do not descend into another document;
+;;    the input's own frame runs its own content script (all_frames), and
+;;    cross-origin sub-frame logins use the fixed-position popup instead.
+(defn deep-active-element []
+  (loop [^js el js/document.activeElement]
+    (let [sr (when el (.-shadowRoot el))
+          inner (when sr (.-activeElement sr))]
+      (if (and inner (not (identical? inner el)))
+        (recur inner)
+        el))))

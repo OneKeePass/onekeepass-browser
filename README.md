@@ -5,14 +5,21 @@ It is a basic version and should work with many sites to provide login credentia
 
 You get the extension for [Firefox](https://addons.mozilla.org/en-US/firefox/addon/onekeepass-browser/) or [Chrome](https://chromewebstore.google.com/detail/onekeepass-browser/cmdmojmbfcpkloflnjkkdjcflaidangh)
 
+See the  [CHANGELOG](docs/CHANGELOG.md) for release details
+
+## User Guide
+
 A basic [User Guide ](docs/user-guide.md) is available explaining how to use this extension with OneKeePass desktop app
 
-## Firefox build
+
+## Build
+
+### Firefox build
 ```npm run firefox```
 
 ```npx shadow-cljs release extension-dist```
 
-## Chrome build
+### Chrome build
 ```npm run chrome```
 
 ```npx shadow-cljs release extension-dist```

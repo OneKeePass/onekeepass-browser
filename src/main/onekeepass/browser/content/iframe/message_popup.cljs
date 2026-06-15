@@ -13,7 +13,9 @@
     :refer [mui-box mui-button mui-stack mui-typography]]
    [onekeepass.browser.common.utils :as u]
    [onekeepass.browser.content.iframe.events.iframe-content-messaging :as iframe-content-messaging]
+   [onekeepass.browser.content.iframe.events.popup-iframe-bg :as popup-iframe-bg]
    [onekeepass.browser.content.iframe.msg-popup :as msg-popup]
+   [reagent.core :as r]
    [reagent.dom :as rd]))
 
 ;; The maximum size for a Chrome extension popup is 800 pixels in width and 600 pixels in height.
@@ -125,6 +127,23 @@
    [mui-typography {:variant "body1" :color color :sx {}}
     msg]])
 
+(defn- connected-info []
+  (let [site-disabled? (:site-disabled @(iframe-content-messaging/site-disable-info))]
+    [mui-stack {:sx {:text-align "center" :align-items "center"}}
+     [mui-typography {:variant "body1" :color "primary.main" :sx {}}
+      (u/lstr "connectedToApp")]
+     (when-not site-disabled?
+       [mui-button {:sx {:mt 2}
+                    :size "small"
+                    :variant "contained"
+                    :color "secondary"
+                    :on-click (fn [e]
+                                (j/call e :preventDefault)
+                                (iframe-content-messaging/send-bg-redetect-fields)
+                                (delayed-close-popup))}
+
+        (u/lstr "redetectLoginFields")])]))
+
 (defn- popup-center-content []
   (let [{:keys [connection-state association-id association-rejected]} @(iframe-content-messaging/popup-action-info)]
 
@@ -150,15 +169,68 @@
 
       (or (= connection-state PROXY_TO_APP_CONNECTED)
           (= connection-state APP_CONNECTED))
-      [msg-part (u/lstr "connectedToApp")]
+      [connected-info]
 
       :else
       [msg-part
        (str "Unknown state" connection-state)])))
 
+;; Quick per-site disable/enable of the login-detection content script work.
+;; Shown in all connection states as this is a local browser setting and does
+;; not need the OneKeePass app. Hidden when the page has no host (e.g about:
+;; or chrome: pages). After the toggle the background reloads the tab, so the
+;; new state takes effect immediately
+(defn- site-disable-section []
+  (let [include-subdomains? (r/atom false)]
+    (fn []
+      (let [{:keys [page-host site-disabled matched-disabled-host matched-include-subdomains]}
+            @(iframe-content-messaging/site-disable-info)]
+        (when (seq page-host)
+          [mui-box {:sx {:mr 1 :ml 1 :mb 1}}
+           [m/mui-divider {:sx {:mb 1}}]
+           (if site-disabled
+             [mui-stack {:spacing 1 :sx {:align-items "center"}}
+              [mui-typography {:variant "body2" :color "text.secondary"}
+               (str "OneKeePass is disabled on " matched-disabled-host
+                    (when matched-include-subdomains " (including subdomains)"))]
+              [mui-button {:size "small"
+                           :variant "outlined"
+                           :on-click (fn [e]
+                                       (j/call e :preventDefault)
+                                       (popup-iframe-bg/send-bg-toggle-site-disabled
+                                        {:host matched-disabled-host
+                                         :disable? false})
+                                       (delayed-close-popup))}
+               "Enable on this site"]]
+
+             [mui-stack {:spacing 1 :sx {:align-items "center"}}
+              [mui-box {:sx {:display "flex" :align-items "center" :gap 1}}
+               [:input {:type "checkbox"
+                        :id "disable-include-subdomains-cb"
+                        :checked @include-subdomains?
+                        :on-change #(swap! include-subdomains? not)
+                        :style {:width "14px" :height "14px" :cursor "pointer"
+                                :accent-color "#1976d2"}}]
+               [:label {:html-for "disable-include-subdomains-cb"
+                        :style {:cursor "pointer" :font-size "13px"
+                                :font-family "Roboto, sans-serif"
+                                :user-select "none"}}
+                "Include subdomains"]]
+              [mui-button {:size "small"
+                           :variant "outlined"
+                           :on-click (fn [e]
+                                       (j/call e :preventDefault)
+                                       (popup-iframe-bg/send-bg-toggle-site-disabled
+                                        {:host page-host
+                                         :include-subdomains @include-subdomains?
+                                         :disable? true})
+                                       (delayed-close-popup))}
+               (str "Disable on " page-host)]])])))))
+
 (defn- popup-main-content []
   #_(okp-println "Red is " m/color-red-600)
-  (let [timer (atom nil)]
+  (let [timer (atom nil)
+        site-disabled? (:site-disabled @(iframe-content-messaging/site-disable-info))]
     [mui-box {:sx
               {:bgcolor "background.paper"
                ;;:width "400px"
@@ -231,7 +303,10 @@
                                                     :align-content "center"}}
        [popup-center-content]]
 
-      ;; Footer part if we need 
+      ;; Per-site disable/enable quick action
+      [site-disable-section]
+
+      ;; Footer part if we need
       ;; Add some action icons ?
       [mui-box {:component "footer" :sx {:bgcolor m/color-grey-200
                                          :min-height 35}}
@@ -245,23 +320,16 @@
            [m/mui-icon-settings-outlined]]]
          ;; Using tootip resulted the following waring in page console
          ;; Warning: Failed prop type: Invalid prop `container` supplied to `ForwardRef`, expected one of type [function].
-         [m/mui-tooltip {:title "Redetect" :enterDelay 1000}
-          [m/mui-icon-button
-           {:edge "start" :color "inherit"
-            :on-click (fn []
-                        (iframe-content-messaging/send-bg-redetect-fields)
-                        (delayed-close-popup))}
-           [m/mui-icon-cyclone]]
-          #_[:<>
-             [m/mui-icon-button
-              {:edge "start" :color "inherit"
-               :on-click (fn []
-                           (messaging-event/send-redetect-fields)
-                           (remove-popup-box-host-with-delay))}
-              [m/mui-icon-cyclone]]]
-          #_[m/mui-icon-cyclone {:on-click (fn []
-                                             (messaging-event/send-redetect-fields)
-                                             (remove-popup-box-host-with-delay))}]]]]]]]))
+         ;; Redetect is hidden when the site is disabled as the content script
+         ;; does not register the redetect handler on such a page
+         (when-not site-disabled?
+           [m/mui-tooltip {:title "Redetect" :enterDelay 1000}
+            [m/mui-icon-button
+             {:edge "start" :color "inherit"
+              :on-click (fn []
+                          (iframe-content-messaging/send-bg-redetect-fields)
+                          (delayed-close-popup))}
+             [m/mui-icon-cyclone]]])]]]]]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 

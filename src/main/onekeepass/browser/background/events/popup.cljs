@@ -4,28 +4,37 @@
    [onekeepass.browser.common.connection-states :refer [APP_DISCONNECTED
                                                         NATIVE_APP_NOT_AVAILABLE]]
    [onekeepass.browser.common.message-type-names :refer [POPUP_ACTION]]
+   [onekeepass.browser.common.site-matching :as site-matching]
    [re-frame.core :refer [dispatch reg-event-fx]]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;; Popup related re-frame events  ;;;;;;;;;;;;
 
 (defn popup-onclick-action
   "Called to send the popup action message to the content side"
-  [tab-id]
-  (dispatch [:popup-onclick-action tab-id]))
+  [tab-id tab-url]
+  (dispatch [:popup-onclick-action tab-id tab-url]))
 
 (reg-event-fx
  :popup-onclick-action
- (fn [{:keys [db]} [_event-id tab-id]]
+ (fn [{:keys [db]} [_event-id tab-id tab-url]]
    #_(println "popup/onclick-action app-db is " db)
    (let [state (cmn-event/proxy-connection-state db)
-         association-id (get-in db [:association-id])]
+         association-id (get-in db [:association-id])
+         ;; Site disable info for the popup's quick 'Disable/Enable on this site' action
+         page-host (site-matching/url->host tab-url)
+         matched-rule (site-matching/find-matching-site-rule
+                       page-host (get-in db [:settings :disabled-sites]))]
 
-     ;; Send the current connection state to the content script of the current tab which in turn injects a suitable 
+     ;; Send the current connection state to the content script of the current tab which in turn injects a suitable
      {:fx [[:common/send-content-message-regfx {:message-data
                                                 {:message-type POPUP_ACTION
                                                  ;; :message ""
                                                  :association-id association-id
-                                                 :connection-state state}
+                                                 :connection-state state
+                                                 :page-host page-host
+                                                 :site-disabled (boolean matched-rule)
+                                                 :matched-disabled-host (:host matched-rule)
+                                                 :matched-include-subdomains (:include-subdomains matched-rule)}
                                                 :tab-id tab-id
                                                 :frame-id 0}]]})))
 

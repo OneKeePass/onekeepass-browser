@@ -5,6 +5,7 @@
    [onekeepass.browser.background.events.messaging :as messaging-event]
    [onekeepass.browser.background.events.content]
    [onekeepass.browser.background.events.passkey]
+   [onekeepass.browser.background.events.settings]
    [onekeepass.browser.background.passkey :as passkey]
    [onekeepass.browser.background.tab-interactions :as tab-interactions]
    [onekeepass.browser.common.utils :refer [is-firefox-browser?]]
@@ -88,11 +89,13 @@
                (let [raw      (j/get result :okp-settings)
                      settings (if raw (js->clj raw :keywordize-keys true) {})
                      enabled? (get settings :passkeys-enabled true)]
-                 (dispatch [:settings/loaded {:passkeys-enabled enabled?}])
+                 (dispatch [:settings/loaded {:passkeys-enabled enabled?
+                                              :disabled-sites (get settings :disabled-sites [])}])
                  (when enabled?
                    (setup-passkey-proxy))))))
 
-  ;; React to future setting changes written by the settings popup iframe.
+  ;; React to future setting changes written by the settings popup iframe
+  ;; or by the quick site disable/enable toggle of the main popup.
   (.addListener js/chrome.storage.onChanged
                 (fn [changes area]
                   (when (= area "local")
@@ -100,4 +103,5 @@
                       (let [new-val  (j/get change :newValue)
                             settings (if new-val (js->clj new-val :keywordize-keys true) {})
                             enabled? (get settings :passkeys-enabled true)]
-                        (dispatch [:settings/passkeys-enabled-changed enabled?])))))))
+                        (dispatch [:settings/passkeys-enabled-changed enabled?])
+                        (dispatch [:settings/disabled-sites-changed (get settings :disabled-sites [])])))))))

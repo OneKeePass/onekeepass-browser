@@ -60,3 +60,57 @@
   (let [body (j/get js/document :body)]
     (when (instance? js/HTMLBodyElement body)
       (resgister-dom-mutation-tracking body callback-on-observe))))
+
+
+;;;;;;;;;;;;;;;;;;;;; Version 2 ;;;;;;;;;;;;;;;;;;;;;;
+
+;; TODO: Needs testing on more sites to determine whether is it worth to use this version
+
+;; After a relevant mutation we wait this long, then run one detection pass. This
+;; is a *throttle*, not a reset-debounce: once a pass is armed it fires after the
+;; window even if more mutations keep arriving, then re-arms. A reset-debounce
+;; would be starved on a continuously churning page (ads / SPA hydration) and
+;; never detect a login form that appears there.
+#_(def ^:private detect-throttle-ms 400)
+
+;; A mutation is worth a detection pass only when it adds a <form> or a (non-okp)
+;; <div> - the containers a login form may appear in. Text nodes and our own
+;; okp-* hosts are ignored. (We intentionally skip our own shadow-dom host divs.)
+#_(defn- relevant-added-node? [node]
+    (when-let [tag (j/get node :tagName)]
+      (let [tag (str/lower-case tag)]
+        (cond
+          (= tag "form") true
+          (= tag "div")  (not (str/starts-with? (or (j/get node :id) "") "okp-"))
+          :else false))))
+
+#_(defn- relevant-mutations? [mutation-list]
+    (some (fn [mutation]
+            (and (= (j/get mutation :type) "childList")
+                 (some relevant-added-node? (array-seq (j/get mutation :addedNodes)))))
+          (array-seq mutation-list)))
+
+#_(defn inputs-on-dom-observation
+    "Observes the body subtree for dynamically added login containers and calls
+   'callback-on-observe' (with no args) after a quiet window. The callback is
+   debounced and fired only when a relevant node was added, so a login-less but
+   churny page (news feed, SPA) does not trigger a detection pass per mutation."
+    [callback-on-observe]
+    ;; body may be HTMLBodyElement or HTMLFrameSetElement or nil
+    (let [body (j/get js/document :body)]
+      (when (instance? js/HTMLBodyElement body)
+        (let [timer (atom nil)
+              run (fn []
+                    (reset! timer nil)
+                    (callback-on-observe))
+              on-mutations (fn [mutation-list _observer]
+                             ;; Throttle: arm a pass only when one is not already
+                             ;; pending. Mutations during the window are absorbed,
+                             ;; the pass still fires, then re-arms on the next
+                             ;; relevant mutation - never starved by constant churn.
+                             (when (and (nil? @timer)
+                                        (relevant-mutations? mutation-list))
+                               (reset! timer (js/setTimeout run detect-throttle-ms))))
+              observer (js/MutationObserver. on-mutations)]
+          (.observe observer body #js {:childList true :subtree true})))))
+

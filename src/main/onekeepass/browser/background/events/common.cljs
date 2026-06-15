@@ -48,6 +48,16 @@
 (defn generate-request-id []
   (js/crypto.randomUUID))
 
+(defn url->origin
+  "Returns the origin (scheme + host + optional non-default port) of a url,
+   dropping path/query/fragment. Falls back to the raw url when it cannot be
+   parsed. Used to show the fill-target origin in the entry-list popup (#6)."
+  [url]
+  (try
+    (.-origin (js/URL. url))
+    (catch :default _e
+      url)))
+
 ;; There is no Native messaging manifests file is found
 #_(def NATIVE_MESSAGING_MANIFEST_IS_NOT_FOUND "NM_MANIFEST_IS_NOT_FOUND")
 

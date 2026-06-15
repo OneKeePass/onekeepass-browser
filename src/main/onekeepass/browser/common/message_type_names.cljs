@@ -77,6 +77,10 @@
 (def CLOSE_SETTINGS_POPUP "CLOSE_SETTINGS_POPUP")
 (def RESIZE_IFRAME_SETTINGS "RESIZE_IFRAME_SETTINGS")
 
+;; Main popup iframe → background: add or remove the current site in the
+;; disabled-sites list of okp-settings
+(def TOGGLE_SITE_DISABLED "TOGGLE_SITE_DISABLED")
+
 (def REDETECT_FIELDS "REDETECT_FIELDS")
 
 (def RECONNECT_APP "RECONNECT_APP")

@@ -16,9 +16,11 @@
                                                          SHOW_PASSKEY_GROUPS
                                                          SHOW_SETTINGS_POPUP]]
    [onekeepass.browser.common.utils :as u]
+   [onekeepass.browser.content.common-ui :as common-ui]
    [onekeepass.browser.content.context :as context]
    [onekeepass.browser.content.iframe.dragging-support :as dragging-support]
    [onekeepass.browser.content.iframe.events.content-iframe-messaging :as content-iframe-messaging]
+   [onekeepass.browser.content.events.messaging :as messaging-event]
    [onekeepass.browser.content.inject.listener-store :as listener-store]
    [re-frame.core :refer [dispatch]]))
 
@@ -112,6 +114,7 @@
 (defn- create-host-element 
   "Creates a host element for the shadowdom use"
   [tag-name host-styles]
+  #_(u/okp-println "Creating okp tag-name" tag-name)
   (let [;; {:keys [left top]} host-styles
         {:keys [right left top]} host-styles
         _ (when (and right left) (u/okp-console-log "Warning: Both left and right positions are passed"))
@@ -444,15 +447,67 @@
         #_(u/okp-println "outside-clicked-listener will call entry-list host removal for input name" (j/get input-element :name))
         (close-entry-list-popup)))))
 
-(defn create-entry-list-popup 
-  "Called to lauch iframe based entry list"
-  []
-  #_(u/okp-println "1 Iframp popup: create-entry-list-popup is called ")
+(defn- setup-entry-list-popup
+  "Wires up the common resize/close listeners and the content<->iframe channel, then
+   sends the matched entries to the launched iframe which renders the mui entry list."
+  [iframe-element]
+  (reset! entry-list-popup-iframe-element-store iframe-element)
 
-  (let [focused-input js/document.activeElement]
-    #_(u/okp-console-log "Focused input is " focused-input)
+  #_(iframe-resize-message-listener-1 iframe-element nil) ;; No handle-element
+  (iframe-resize-message-listener {:iframe-element iframe-element :message-type RESIZE_IFRAME_ENTRY_LIST})
+
+  ;; Message listener to receive close popup call
+  (content-iframe-messaging/register-iframe-message-handlers
+   {CLOSE_ENTRY_LIST_POPUP close-entry-list-popup
+    CUSTOM_ICON_LOADED content-iframe-messaging/send-custom-icon-loaded-message})
+
+  ;; Establishes the communication channel between content and the launched iframe
+  (content-iframe-messaging/init-content-iframe-message-channel iframe-element)
+
+  ;; Need to send this message with matched entries data to the launched iframe which then shows the mui entry list
+  (content-iframe-messaging/send-matched-entries-loaded-message))
+
+;; FUTURE (precise anchoring): if the top-left placement feels too detached on many
+;; sites, anchor under the actual field instead. The sub-frame can read the input rect
+;; but not its iframe's offset in the parent; the top frame knows the iframe offset but
+;; cannot read the cross-origin input. Bridge with a window.postMessage relay up the
+;; frame chain: each hop matches event.source to its child iframe, adds that iframe's
+;; getBoundingClientRect offset, and forwards up; the top frame renders at the summed
+;; coords (falling back to the fixed position below if the relay hasn't arrived). This
+;; is purely a positioning add-on: the background routing and the login-field-frame fill
+;; redirection stay as-is. (Same approach Bitwarden/1Password use; no Chrome API exists
+;; for cross-origin element geometry.)
+(defn- create-entry-list-popup-fixed
+  "Renders the entry list popup at a fixed, draggable location in this (main) frame.
+   Used when the login fields are inside a cross-origin sub-frame: there is no focused
+   login input here, and anchoring inside that small iframe would clip the popup
+   (e.g Charles schwab)."
+  []
+  (remove-host-element-by-id (form-element-id OKP_ENTRY_LIST_TAG_NAME))
+  (let [{:keys [host-element iframe-element handle-element]}
+        (create-entry-list-popup-internal
+         {:iframe-src       "entry_list_popup.html"
+          :tag-name         OKP_ENTRY_LIST_TAG_NAME
+          :host-left        20
+          :host-top         100
+          :width            420
+          :dragging-support true
+          :close-popup      close-entry-list-popup})]
+    (dragging-support/add-drag-support host-element iframe-element handle-element)
+    (setup-entry-list-popup iframe-element)))
+
+(defn- create-entry-list-popup-anchored
+  "Renders the entry list popup anchored directly under the focused login input."
+  []
+  (let [focused-input (common-ui/deep-active-element)]
+    #_(u/okp-console-log "Focused input in 'create-entry-list-popup-anchored' is " focused-input)
     (when (or (= focused-input (context/username-in-page))
               (= focused-input (context/password-in-page)))
+      ;; Close any existing entry list popup first so moving from one login field to
+      ;; another (e.g username -> password) shows a single popup, not one under each.
+      ;; (The fixed/passkey paths already do this; the anchored path relied on the racy
+      ;; outside-click listener which could leave the previous popup open.)
+      (remove-host-element-by-id (form-element-id OKP_ENTRY_LIST_TAG_NAME))
       (let [{:keys [top left width]} (calculate-list-positions focused-input)
             {:keys [iframe-element]} (create-entry-list-popup-internal
                                       {:iframe-src "entry_list_popup.html"
@@ -460,24 +515,20 @@
                                        :host-left left
                                        :host-top top
                                        :width width})]
-
-        (reset! entry-list-popup-iframe-element-store iframe-element)
-
         (listener-store/add-entry-list-outside-clicked-listener (entry-list-outside-click-handler focused-input))
-        ;; 
-        #_(iframe-resize-message-listener-1 iframe-element nil) ;; No handle-element
-        (iframe-resize-message-listener {:iframe-element iframe-element :message-type RESIZE_IFRAME_ENTRY_LIST})
+        (setup-entry-list-popup iframe-element)))))
 
-        ;; Message listener to receive close popup call
-        (content-iframe-messaging/register-iframe-message-handlers
-         {CLOSE_ENTRY_LIST_POPUP close-entry-list-popup
-          CUSTOM_ICON_LOADED content-iframe-messaging/send-custom-icon-loaded-message})
-
-        ;; Establishes the communication channel between content and the launched iframe
-        (content-iframe-messaging/init-content-iframe-message-channel iframe-element)
-
-        ;; Need to send this message with matched entries data to the launched iframe which then shows the mui entry list
-        (content-iframe-messaging/send-matched-entries-loaded-message)))))
+(defn create-entry-list-popup
+  "Called to launch iframe based entry list. When the login fields are inside a
+   cross-origin sub-frame, this runs in the main frame with no focused login input, so
+   the popup is rendered at a fixed position; otherwise it is anchored under the input."
+  []
+  #_(u/okp-println "1 Iframp popup: create-entry-list-popup is called ")
+  ;; messaging-event reads content-side app-db state (here the flag set by background);
+  ;; content-iframe-messaging (used below) is the separate content<->popup-iframe channel
+  (if @(messaging-event/entry-list-fixed-position)
+    (create-entry-list-popup-fixed)
+    (create-entry-list-popup-anchored)))
 
 (defn create-passkey-list-popup
   "Launches the passkey selection popup for the WebAuthn get (authentication) flow.

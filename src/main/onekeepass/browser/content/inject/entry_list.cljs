@@ -160,7 +160,7 @@
    "
   []
   (let [focused-input js/document.activeElement]
-    (u/okp-console-log "Focused input is " focused-input)
+    #_(u/okp-console-log "Focused input in 'show-entry-summaries' is " focused-input)
 
     (when-some [username-input (context/username-in-page)]
       (when (= focused-input username-input)

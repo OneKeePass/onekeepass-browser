@@ -187,7 +187,9 @@
 (reg-event-fx
  :content-iframe/popup-action-message
  (fn [{:keys [db]} [_event_id]]
-   (let [message-data  (select-keys db [:connection-state :association-id :association-rejected])
+   (let [message-data  (select-keys db [:connection-state :association-id :association-rejected
+                                        :page-host :site-disabled :matched-disabled-host
+                                        :matched-include-subdomains])
          message-data (merge {:message-type POPUP_ACTION} message-data)]
      {:fx [[:common/send-iframe-message-regfx message-data]]})))
 
@@ -203,7 +205,7 @@
  :content-iframe/received-msg-box-message
  (fn [{:keys [db]} [_event-id]]
    (let [message-data (select-keys db [:no-browser-enabled-db :no-matching-entries :no-matching-recent-url
-                                       :background-error :no-matching-passkeys])
+                                       :background-error :no-matching-passkeys :fields-not-filled])
          message-data (merge {:message-type "MSG_BOX_MESSAGE"} message-data)]
      {:fx [[:common/send-iframe-message-regfx message-data]]})))
 
@@ -211,7 +213,7 @@
 (reg-event-fx
  :content-iframe/matched-entries-loaded
  (fn [{:keys [db]} [_event-id]]
-   (let [message-data (select-keys db [:matched-entries])
+   (let [message-data (select-keys db [:matched-entries :fill-target-origin :top-origin])
          message-data (merge {:message-type SHOW_ENTRY_LIST} message-data)]
      #_(u/okp-println "Sending entries data of SHOW_ENTRY_LIST" message-data "to iframe")
      {:fx [[:common/send-iframe-message-regfx message-data]]})))

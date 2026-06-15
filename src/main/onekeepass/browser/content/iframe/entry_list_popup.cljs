@@ -1,6 +1,7 @@
 (ns onekeepass.browser.content.iframe.entry-list-popup
   "Sample one"
   (:require
+   [applied-science.js-interop :as j]
    [onekeepass.browser.common.message-type-names :refer [RESIZE_IFRAME_ENTRY_LIST]]
    [onekeepass.browser.common.mui-components
     :as m
@@ -16,8 +17,40 @@
   (js/window.setTimeout
    (fn [] (iframe-content-messaging/close-entry-list-popup)) 500))
 
+;; Clickjacking hardening: act only on a genuine user gesture. A page-
+;; dispatched synthetic click has isTrusted=false; a real click inside our
+;; closed-shadow extension iframe has isTrusted=true. Reagent hands us the React
+;; SyntheticEvent, so we also check the underlying nativeEvent. This blocks a
+;; page from programmatically triggering an entry selection / fill.
+(defn- trusted-event? [e]
+  (boolean
+   (or (j/get e :isTrusted)
+       (some-> (j/get e :nativeEvent) (j/get :isTrusted)))))
 
-;; This is based on the example mui code in 
+
+;; Clickjacking hardening: show the origin the credential will be filled
+;; into, but ONLY when it differs from the top page origin - i.e the login fields
+;; are in a cross-origin (embedded) iframe. For a normal same-origin login this
+;; stays hidden (no noise). When they differ - the user is on one site but the
+;; login frame is another - the header surfaces it so an embedded login (legit SSO
+;; or an attacker framing a real login) is noticeable.
+;; The value is an origin (scheme + host + port, no path), so it is short; we wrap
+;; it in full (break-all) rather than truncate, because the registrable domain is
+;; at the end of the host and clipping the tail would hide the part that matters.
+;; A native title tooltip lets the user confirm the full value on hover.
+(defn- fill-target-header []
+  (let [origin @(iframe-content-messaging/fill-target-origin)
+        top    @(iframe-content-messaging/top-origin)]
+    (when (and (seq origin) (seq top) (not= origin top))
+      [mui-stack {:sx {:px 1.5 :py 0.5 :align-items "center"}}
+       [mui-typography {:variant "caption" :color "text.secondary"}
+        (u/lstr "embeddedLoginFrom")]
+       [mui-typography {:variant "body2" :color "secondary.main"
+                        :title origin
+                        :sx {:wordBreak "break-all" :font-weight 500}}
+        origin]])))
+
+;; This is based on the example mui code in
 ;; https://mui.com/material-ui/react-list/#sticky-subheader
 (defn- dbs-entry-list-content []
   (let [matched-entries @(iframe-content-messaging/matched-entries)
@@ -42,9 +75,10 @@
                             ^{:key uuid} [mui-list-item {;; :divider true
                                                          :button "true"
                                                          :value uuid
-                                                         :on-click (fn []
-                                                                     (iframe-content-messaging/send-entry-selected db-key uuid)
-                                                                     (delayed-close-popup))
+                                                         :on-click (fn [e]
+                                                                     (when (trusted-event? e)
+                                                                       (iframe-content-messaging/send-entry-selected db-key uuid)
+                                                                       (delayed-close-popup)))
                                                          ;; :selected (if (= @selected-id history-index) true false)
                                                          ;; :secondaryAction (when (= @selected-id (:uuid item)) (r/as-element [mui-icon-button {:edge "end"} [mui-icon-more-vert]]))
                                                          }
@@ -85,6 +119,7 @@
                       ;;             (remove-host)))
                       }
              [mui-stack {:sx {}}
+              [fill-target-header]
               [mui-stack {:sx {}}
                [mui-stack {:sx {:width "100%"}}
                 [dbs-entry-list-content]]]]]))

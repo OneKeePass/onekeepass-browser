@@ -3,6 +3,7 @@
    [applied-science.js-interop :as j]
    [clojure.string :as str]
    [onekeepass.browser.common.utils :as u]
+   [onekeepass.browser.content.common-ui :as common-ui]
    [onekeepass.browser.content.context :refer [get-password-input
                                                get-username-input]]
    [onekeepass.browser.content.iframe.start :as ifs]
@@ -189,6 +190,19 @@
 
           (set-icon-position input component-root size)
 
+          ;; Clicking the icon is an explicit user action: it focuses the input (so the
+          ;; popup anchors correctly) and sends a user-initiated entry list request. This
+          ;; is the on-demand way to bring up the entry list or, when the app is not
+          ;; connected, the connect dialog — automatic focus no longer prompts to connect.
+          ;; mousedown is prevented so clicking the icon does not blur the input.
+          (.addEventListener component-root "mousedown" (fn [e] (j/call e :preventDefault)))
+          (.addEventListener component-root "click"
+                             (fn [e]
+                               (j/call e :stopPropagation)
+                               (j/call e :preventDefault)
+                               (j/call input :focus)
+                               (messaging-event/send-get-entry-list true)))
+
           ;; Reposition on scroll/resize
           (let [handler (fn []
                           (set-icon-position input component-root size))]
@@ -211,6 +225,31 @@
 ;; To toggle click and focus event handlers of input
 (def ^:private input-focus-info (atom {}))
 
+;; Set while fill-inputs programmatically fills the page. Programmatic focus and
+;; the resulting input events would otherwise reopen the entry-list popup (the
+;; focus listener sees a still-blank field). The fill flow handles closing the
+;; popup itself, so the focus/input listeners no-op while this is true.
+(def ^:private suppress-listeners? (atom false))
+
+(defn set-suppress-listeners! [v]
+  (reset! suppress-listeners? v))
+
+(defn- handle-focused-input
+  "Shared focus handling: reveal the okp icon on the input and, when the field is
+   empty, ask the background for the matching entry list. Used both by the focus
+   event listener and proactively for a field the page auto-focused before our
+   listener was attached."
+  [input]
+  (when-not @suppress-listeners?
+    (show-input-okp-icon input)
+
+    ;; Keep a flag so that we do not repeat click and focus events
+    (swap! input-focus-info assoc input true)
+
+    (when (str/blank? (j/get input :value))
+      ;; Send a request to the background
+      (messaging-event/send-get-entry-list))))
+
 (defn input-focus-listener
   "Triggers the background entry list loading if required"
   [evt]
@@ -218,16 +257,25 @@
   #_(u/okp-println "input-focus-listener: input is focused and event target is input?" (instance? js/HTMLInputElement (j/get-in evt [:target])))
 
   (j/call evt :stopPropagation)
+  (handle-focused-input (j/get-in evt [:target])))
 
-  (show-input-okp-icon (j/get-in evt [:target]))
+(defn- reveal-icon-if-page-focused
+  "If the page already moved focus into this input (HTML autofocus or a
+   programmatic .focus() on load) before our focus listener was attached, the
+   focus event will not fire again - so run the focus handling once, proactively.
+   Gated on document.hasFocus so a page that auto-focuses a field in a background
+   tab does not pop the entry list there. The input-focus-info flag prevents
+   re-triggering across repeated detection passes.
 
-  ;; Keep a flag so that we do not repeat click and focus events
-  (swap! input-focus-info assoc (j/get-in evt [:target]) true)
-
-  (when (str/blank? (j/get-in evt [:target :value]))
-    #_(u/okp-println "Sending get entry list in input focus....")
-    ;; Send a request to the background 
-    (messaging-event/send-get-entry-list)))
+   deep-active-element (not document.activeElement) so this also pre-reveals on
+   sites whose login input is auto-focused inside shadow DOM (e.g hbomax), where
+   document.activeElement would only report the outermost shadow host."
+  [input]
+  (when (and input
+             (.hasFocus js/document)
+             (identical? input (common-ui/deep-active-element))
+             (not (get @input-focus-info input)))
+    (handle-focused-input input)))
 (defn input-entry-listener
   "Monitors user data entry to this input and based on the value it triggers the entry list or hides the list"
   [evt]
@@ -236,13 +284,14 @@
   #_(j/call evt :stopPropagation)
   (j/call evt :preventDefault)
 
-  (let [value (j/get-in evt [:target :value])]
-    #_(u/okp-console-log "input-entry-listener value from evt is" value (str/blank? value))
-    (if-not (str/blank? value)
+  (when-not @suppress-listeners?
+    (let [value (j/get-in evt [:target :value])]
+      #_(u/okp-console-log "input-entry-listener value from evt is" value (str/blank? value))
+      (if-not (str/blank? value)
       ;; Hide
-      (messaging-event/hide-entry-list)
+        (messaging-event/hide-entry-list)
       ;; Show
-      (messaging-event/send-get-entry-list))))
+        (messaging-event/send-get-entry-list)))))
 
 (defn input-click-listener [evt]
   (u/okp-console-log "input-click-listener: INPUT CLICK is called with event" evt)
@@ -279,14 +328,20 @@
     (listener-store/add-input-named-event-listener input "input" input-entry-listener)
 
     #_(listener-store/add-input-named-event-listener input "click" input-click-listener)
-    #_(listener-store/add-input-named-event-listener input "blur" input-blur-listener))
+    #_(listener-store/add-input-named-event-listener input "blur" input-blur-listener)
+
+    ;; The page may have auto-focused this field before the listener above was
+    ;; attached; reveal the icon now if so.
+    (reveal-icon-if-page-focused input))
 
   (when-some [input (some-> page-info get-password-input)]
     #_(u/okp-console-log  "Adding password input listeners for password input" input)
-    
+
     ;; (listener-store/add-focus-event-listener input input-focus-listener)
     ;; (listener-store/add-input-event-listener input input-entry-listener)
-    
+
     #_(listener-store/add-input-named-event-listener input "focus" input-focus-listener-ifs)
     (listener-store/add-input-named-event-listener input "focus" input-focus-listener)
-    (listener-store/add-input-named-event-listener input "input" input-entry-listener)))
+    (listener-store/add-input-named-event-listener input "input" input-entry-listener)
+
+    (reveal-icon-if-page-focused input)))

@@ -1,7 +1,8 @@
 (ns onekeepass.browser.content.signals
   (:require
    [applied-science.js-interop :as j]
-   [onekeepass.browser.common.regex-utils :as regex-utils]))
+   [onekeepass.browser.common.regex-utils :as regex-utils]
+   [onekeepass.browser.common.utils :as u]))
 
 (defn is-input-action-login [input]
   (j/let [^:js {:keys [formAction baseURI]} input]
@@ -33,7 +34,7 @@
   (reduce
    (fn [acc btn]
      (j/let [^:js {:keys [type innerText outerText textContent formAction baseURI tagName]} btn]
-       ;; (println "DEBUG: login-action-button-signals tagName type innerText outerText " tagName type innerText outerText)
+       (u/okp-println "DEBUG: login-action-button-signals tagName type innerText outerText " tagName type innerText outerText)
        ;;  (js/console.log "Btn considering " btn)
 
        (let [inner-text (.test regex-utils/login-keywords-regex innerText)
@@ -119,6 +120,24 @@
 (def ^:private form-submit-button-query
   "button[type=submit], input[type=submit]")
 
+;; Last-resort fallback. Some SPA/canvas frameworks (e.g Flutter web on
+;; ecams.geico.com) render the submit control as a custom element such as
+;; <flt-semantics role="button">Log In</flt-semantics> instead of a real
+;; <button>/<input type=submit>. We only consult this when the form has no real
+;; submit element, otherwise unrelated role="button" divs (toggles, SSO buttons,
+;; menu items) get mistaken for the form's submit control. The login/signup
+;; signal collectors are keyword gated, and hidden role="button" elements are
+;; filtered out (see visible-button?) so only an active, matching one counts.
+(def ^:private form-submit-button-role-query
+  "[role=button]")
+
+;; checkVisibility resolves ancestor display:none too, so a button hidden because
+;; of its parent is also reported hidden. Chrome 105+, Firefox 106+ (already
+;; relied upon elsewhere in the extension).
+(defn- visible-button? [btn]
+  (j/call btn :checkVisibility #js {:visibilityProperty true
+                                    :opacityProperty true}))
+
 ;; Should this be here or in form_fields ns ?
 ;; We may do the signals extraction part here and moving any ui element handling to form_fields ns
 
@@ -129,12 +148,21 @@
   (let [;; First find form action URI based signal
         {:keys [form-action-login form-action-signup] :as form-signals} (form-action-signals form)
 
-        ;; Collect all submit buttons
+        ;; Collect all submit buttons. Tiered so the role="button" fallback is
+        ;; only consulted when the form has no real submit element.
         buttons (array-seq (j/call form :querySelectorAll form-submit-button-query))
 
         buttons (if-not (empty? buttons)
                   buttons
                   (array-seq (j/call form :querySelectorAll form-submit-button-other-query1)))
+
+        ;; SPA/canvas fallback only — and skip hidden role="button" elements
+        ;; (inactive tab panels, off-screen menu buttons) to avoid false signals
+        buttons (if-not (empty? buttons)
+                  buttons
+                  (->> (j/call form :querySelectorAll form-submit-button-role-query)
+                       array-seq
+                       (filterv visible-button?)))
 
         ;; Possible login signals
         login-btn-signals (login-action-button-signals buttons)

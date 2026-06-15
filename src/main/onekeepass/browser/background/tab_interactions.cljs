@@ -45,7 +45,7 @@
      ;; To avoid that. One Solution: We do not call send message if there is no tab-id in :tabs (not yet done)
      ;; Or we can check the url for the new page etc
      
-     (popup-event/popup-onclick-action (j/get tab :id))
+     (popup-event/popup-onclick-action (j/get tab :id) (j/get tab :url))
      #_(iframe-popup-event/popup-onclick-action (j/get tab :id))
      )))
 

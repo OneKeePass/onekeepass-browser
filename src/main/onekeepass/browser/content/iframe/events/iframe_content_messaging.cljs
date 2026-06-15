@@ -188,6 +188,9 @@
 (defn no-matching-passkeys []
   (subscribe [:iframe-no-matching-passkeys]))
 
+(defn fields-not-filled []
+  (subscribe [:iframe-fields-not-filled]))
+
 (defn no-matching-recent-url []
   (subscribe [:iframe-no-matching-recent-url]))
 
@@ -197,7 +200,9 @@
 ;; Whenever we receive the popup action message POPUP_ACTION from background -> content -> iframe, we store the connection-state and popup ui shown accordingly
 (reg-event-fx
  :iframe-popup-action/message-received
- (fn [{:keys [db]} [_event_id {:keys [connection-state association-id association-rejected]}]]
+ (fn [{:keys [db]} [_event_id {:keys [connection-state association-id association-rejected
+                                      page-host site-disabled matched-disabled-host
+                                      matched-include-subdomains]}]]
    #_(u/okp-println "The connection-state is " connection-state " association-id " association-id)
    #_(let [existing-connection-state (get-in db [:connection-state])]
        (okp-println "existing-connection-state is " existing-connection-state))
@@ -205,7 +210,11 @@
    {:db  (-> db
              (assoc-in [:iframe :connection-state] connection-state)
              (assoc-in [:iframe :association-id] association-id)
-             (assoc-in [:iframe :association-rejected] association-rejected))
+             (assoc-in [:iframe :association-rejected] association-rejected)
+             (assoc-in [:iframe :page-host] page-host)
+             (assoc-in [:iframe :site-disabled] site-disabled)
+             (assoc-in [:iframe :matched-disabled-host] matched-disabled-host)
+             (assoc-in [:iframe :matched-include-subdomains] matched-include-subdomains))
 
     ;; Execute the message handler registered for this message-type CONNECTION_STATE_INFO
     :fx [#_[:dispatch [:iframe/execute-message-handler message-type {}]]]}))
@@ -228,23 +237,44 @@
                                       no-matching-recent-url
                                       no-matching-entries
                                       background-error
-                                      no-matching-passkeys] :as _messagae-data}]]
+                                      no-matching-passkeys
+                                      fields-not-filled] :as _messagae-data}]]
    {:db (-> db
             (assoc-in [:iframe :no-browser-enabled-db] no-browser-enabled-db)
             (assoc-in [:iframe :no-matching-entries] no-matching-entries)
             (assoc-in [:iframe :no-matching-recent-url] no-matching-recent-url)
             (assoc-in [:iframe :background-error] background-error)
-            (assoc-in [:iframe :no-matching-passkeys] no-matching-passkeys))}))
+            (assoc-in [:iframe :no-matching-passkeys] no-matching-passkeys)
+            (assoc-in [:iframe :fields-not-filled] fields-not-filled))}))
 
 (reg-event-fx
  :iframe-matched-entries-loaded
- (fn [{:keys [db]} [_event_id {:keys [matched-entries]}]]
-   {:db (-> db (assoc-in [:iframe :matched-entries] matched-entries))}))
+ (fn [{:keys [db]} [_event_id {:keys [matched-entries fill-target-origin top-origin]}]]
+   {:db (-> db
+            (assoc-in [:iframe :matched-entries] matched-entries)
+            (assoc-in [:iframe :fill-target-origin] fill-target-origin)
+            (assoc-in [:iframe :top-origin] top-origin))}))
 
 (reg-sub
  :iframe-matched-entries
  (fn [db [_event-id]]
    (-> db (get-in [:iframe :matched-entries]))))
+
+(defn fill-target-origin []
+  (subscribe [:iframe-fill-target-origin]))
+
+(defn top-origin []
+  (subscribe [:iframe-top-origin]))
+
+(reg-sub
+ :iframe-fill-target-origin
+ (fn [db [_event-id]]
+   (-> db (get-in [:iframe :fill-target-origin]))))
+
+(reg-sub
+ :iframe-top-origin
+ (fn [db [_event-id]]
+   (-> db (get-in [:iframe :top-origin]))))
 
 (reg-sub
  :iframe-no-browser-enabled-db
@@ -272,11 +302,29 @@
    (-> db (get-in [:iframe :no-matching-passkeys]))))
 
 (reg-sub
+ :iframe-fields-not-filled
+ (fn [db [_event-id]]
+   (-> db (get-in [:iframe :fields-not-filled]))))
+
+(reg-sub
  :iframe-popup-action-info
  (fn [db]
    {:connection-state (get-in db [:iframe :connection-state])
     :association-id (get-in db [:iframe :association-id])
     :association-rejected (get-in db [:iframe :association-rejected])}))
+
+(defn site-disable-info
+  "Provides the data for the main popup's 'Disable/Enable on this site' section"
+  []
+  (subscribe [:iframe-site-disable-info]))
+
+(reg-sub
+ :iframe-site-disable-info
+ (fn [db]
+   {:page-host (get-in db [:iframe :page-host])
+    :site-disabled (get-in db [:iframe :site-disabled])
+    :matched-disabled-host (get-in db [:iframe :matched-disabled-host])
+    :matched-include-subdomains (get-in db [:iframe :matched-include-subdomains])}))
 
 (reg-event-fx
  :iframe-passkey-create/message-received

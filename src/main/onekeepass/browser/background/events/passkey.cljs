@@ -93,7 +93,12 @@
    (if (get-in db [:settings :passkeys-enabled] true)
      (cond
        (nil? (get-in db [:app-port]))
-       ;; App not running / not connected — inform user and reject
+       ;; App not running / not connected — inform user and reject.
+       ;; FOLLOW-UP (UX consistency): the password fill path shows the richer reconnect
+       ;; dialog with an inline "Connect" button, whereas here (and in the get path
+       ;; below) we show a plain BACKGROUND_ERROR message telling the user to go start
+       ;; the app. Consider routing this through the same connect popup so the user can
+       ;; connect inline. Separate from the on-demand/badge connection-state work.
        {:fx [(if (= platform :firefox)
                [:common/send-content-message-regfx
                 {:message-data {:message-type OKP_PASSKEY_REJECT

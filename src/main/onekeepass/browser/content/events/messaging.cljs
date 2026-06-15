@@ -1,5 +1,6 @@
 (ns onekeepass.browser.content.events.messaging
   (:require
+   [applied-science.js-interop :as j]
    [onekeepass.browser.common.message-type-names :refer [BACKGROUND_ERROR
                                                          CONTENT_FRAME_ID
                                                          CONTENT_LOGIN_FIELDS_IDENTIFIED
@@ -43,16 +44,20 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;  Handles incoming messages from background  ;;;;;;;;;;;;;;;;
 (defn register-message-handlers
-  "Called to register all callback functions of messages received by 
+  "Called to register callback functions of messages received by
    the content script either from background or popup scripts
    The arg 'handlers' is a map where keys are message-type and values are callback functions
+   May be called more than once (always-on handlers first, login-detection
+   handlers later when the site is not disabled); the maps are merged
    "
   [handlers]
+  ;; We store these handlers in app-db for later use in various re-frame events
+  (dispatch [:register-message-handlers handlers]))
 
-  ;; First we store these handlers in app-db for later use in various re-frame events
-  (dispatch [:register-message-handlers handlers])
-
-  ;; Need add this listener to receive the messages from backend or popup
+(defn register-message-listener
+  "Called onetime from the content script's init to receive the messages
+   from background or popup scripts"
+  []
   (js/chrome.runtime.onMessage.addListener
    (fn [message _sender _send-response-fn]
      #_(okp-console-log "Received RAW messsage" message "from sender" sender)
@@ -201,11 +206,15 @@
     (dispatch [:send-input-icon-clicked]))
 
 (defn send-get-entry-list
-  "Called to send a message to the backend when user focuse the login page inputs.
-   The backend script in turn gets the entry list matching the page url
-  "
-  []
-  (dispatch [:send-get-entry-list]))
+  "Called to send a message to the backend to get the entry list matching the page url.
+   user-initiated? is true when triggered by an explicit user action (clicking the OKP
+   field icon) and false for automatic triggers (input focus/typing). The background
+   uses this to decide whether to show the connect dialog when the app is not connected:
+   only user-initiated requests prompt to connect, so automatic focus does not nag."
+  ([]
+   (send-get-entry-list false))
+  ([user-initiated?]
+   (dispatch [:send-get-entry-list user-initiated?])))
 
 (defn send-entry-selected [db-key entry-uuid]
   (dispatch [:send-entry-selected db-key entry-uuid])
@@ -217,9 +226,19 @@
   (dispatch [:send-get-custom-icon db-key custom-icon-uuid]))
 
 (defn send-content-script-loading
-  []
+  "Notifies the background that this frame's content script is loading.
+   The background responds with whether the user has disabled this site
+   (checked against the top-level tab url) and the on-response callback
+   is called with that boolean. Fails open: a missing response (e.g
+   transient background error) is treated as not disabled"
+  [on-response]
   #_(okp-println "send-content-script-loading is called ... ")
-  (js/chrome.runtime.sendMessage  (clj->js {:message-type CONTENT_SCRIPT_LOADING})))
+  (js/chrome.runtime.sendMessage
+   (clj->js {:message-type CONTENT_SCRIPT_LOADING})
+   (fn [response]
+     ;; Touching lastError avoids 'Unchecked runtime.lastError' console noise
+     (let [_ js/chrome.runtime.lastError]
+       (on-response (boolean (and response (j/get response :site-disabled))))))))
 
 (defn send-login-fields-identified [fields-info]
   ;; fields-info is empty at this time
@@ -245,6 +264,15 @@
 (defn hide-entry-list []
   (dispatch [:hide-entry-list]))
 
+;; The clickjacking hardening UX: called from the fill path when an existing
+;; login field was skipped (hidden / covered at fill time). Shows the shared
+;; msg-box popup with a small note so a partial fill is understandable.
+(defn show-fields-not-filled-message []
+  (dispatch [:show-fields-not-filled-message]))
+
+(defn fields-not-filled []
+  (subscribe [:fields-not-filled]))
+
 (defn background-error []
   (subscribe [:background-error]))
 
@@ -260,6 +288,12 @@
 (defn matched-entries []
   (subscribe [:matched-entries]))
 
+(defn entry-list-fixed-position
+  "True when the entry list popup should render at a fixed position in this (main)
+   frame because the login fields are inside a cross-origin sub-frame"
+  []
+  (subscribe [:entry-list-fixed-position]))
+
 (defn entry-selection-done
   "Flag determines whether to show the popup entry list or not"
   []
@@ -269,10 +303,11 @@
   (dispatch [:reset-background-error]))
 
 ;; The arg 'handlers' is a map where keys are message-type and values are callback functions
+;; Merged (not replaced) as the handlers are registered in two steps
 (reg-event-fx
  :register-message-handlers
  (fn [{:keys [db]} [_event-id handlers]]
-   {:db (-> db (assoc :message-handlers handlers))}))
+   {:db (-> db (update :message-handlers merge handlers))}))
 
 #_(reg-event-fx
    :send-input-icon-clicked
@@ -281,8 +316,9 @@
 
 (reg-event-fx
  :send-get-entry-list
- (fn [{:keys [_db]} [_event-id]]
-   {:fx [[:common/send-bg-message-regfx {:message-type GET_ENTRY_LIST}]]}))
+ (fn [{:keys [_db]} [_event-id user-initiated?]]
+   {:fx [[:common/send-bg-message-regfx {:message-type GET_ENTRY_LIST
+                                         :user-initiated (boolean user-initiated?)}]]}))
 
 ;; Sends a message to the background to get basic entry detail for the selected entry uuid
 (reg-event-fx
@@ -378,13 +414,22 @@
 ;; Called on receiving the message-type SHOW_ENTRY_LIST which in turn calls the callback fn
 (reg-event-fx
  :matched-entries-loaded
- (fn [{:keys [db]} [_event-id {:keys [message-type matched-entries]}]]
+ (fn [{:keys [db]} [_event-id {:keys [message-type matched-entries fixed-position
+                                      fill-target-origin top-origin]}]]
    ;; matched-entries is a vec of map from vec of struct 'MatchedDbEntries'
+   ;; fixed-position is true when the login fields are in a sub-frame and the popup
+   ;; is rendered in this (main) frame at a fixed location instead of anchored to an input
+   ;; fill-target-origin / top-origin: shown in the popup so the user sees which
+   ;; origin the credential is filled into (#6)
    {:db (-> db
             (assoc-in [:entry-selected-done] false)
             (assoc-in [:matched-entries] matched-entries)
+            (assoc-in [:entry-list-fixed-position] fixed-position)
+            (assoc-in [:fill-target-origin] fill-target-origin)
+            (assoc-in [:top-origin] top-origin)
             (assoc-in [:no-browser-enabled-db] false)
             (assoc :no-matching-entries false)
+            (assoc :fields-not-filled false)
             (assoc-in [:no-matching-recent-url] nil))
     :fx [[:execute-message-handler-regfx [(get-in db [:message-handlers message-type]) nil]]]}))
 
@@ -403,6 +448,21 @@
  (fn [{:keys [db]} [_event_id]]
    {:db (-> db (assoc-in [:entry-selected-done] true))}))
 
+;; Reuse the msg-box popup (the same one used for NO_MATCHING_ENTRIES) to
+;; tell the user some login fields were skipped because they were hidden or
+;; covered at fill time. We reset the other msg-box flags so the popup shows
+;; only this note, then call the registered msg-box handler to launch it.
+(reg-event-fx
+ :show-fields-not-filled-message
+ (fn [{:keys [db]} [_event-id]]
+   {:db (-> db
+            (assoc :fields-not-filled true)
+            (assoc :no-matching-entries false)
+            (assoc-in [:no-matching-recent-url] nil)
+            (assoc-in [:no-browser-enabled-db] false)
+            (assoc :no-matching-passkeys false))
+    :fx [[:execute-message-handler-regfx [(get-in db [:message-handlers NO_MATCHING_ENTRIES]) nil]]]}))
+
 ;; Called when message NO_BROWSER_ENABLED_DB from background is received
 (reg-event-fx
  :received-no-browser-enabled-db
@@ -410,6 +470,7 @@
    {:db (-> db (assoc :no-browser-enabled-db true)
             ;; Reset any previous flag of no matching to be sure we handle only no db error
             (assoc :no-matching-entries false)
+            (assoc :fields-not-filled false)
             (assoc-in [:no-matching-recent-url] nil))
     :fx [[:execute-message-handler-regfx [(get-in db [:message-handlers message-type]) nil]]]}))
 
@@ -420,6 +481,7 @@
 
    {:db (-> db (assoc :no-matching-entries true)
             (assoc-in [:no-matching-recent-url] url)
+            (assoc :fields-not-filled false)
             (assoc-in [:no-browser-enabled-db] false))
     :fx [[:execute-message-handler-regfx [(get-in db [:message-handlers message-type]) nil]]]}
 
@@ -514,9 +576,19 @@
    (-> db (get :no-matching-recent-url))))
 
 (reg-sub
+ :fields-not-filled
+ (fn [db [_event-id]]
+   (-> db (get :fields-not-filled))))
+
+(reg-sub
  :matched-entries
  (fn [db [_event-id]]
    (-> db (get-in [:matched-entries]))))
+
+(reg-sub
+ :entry-list-fixed-position
+ (fn [db [_event-id]]
+   (-> db (get-in [:entry-list-fixed-position]))))
 
 (reg-sub
  :background-error

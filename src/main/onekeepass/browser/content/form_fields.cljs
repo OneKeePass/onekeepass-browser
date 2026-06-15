@@ -341,11 +341,27 @@
 ;; Both login and signup forms are in the same page
 ;; None of the above - just the application's other pages
 
+;; Flutter web (CanvasKit) renders inputs on a <canvas> and keeps text state
+;; internally. The <input> elements in its accessibility/semantics tree are not
+;; wired to Flutter's editing state, so setting their value via the DOM (even with
+;; a trusted execCommand insert) never reaches Flutter and nothing fills.
+;; e.g ecams.geico.com. We detect such pages and skip identification entirely so
+;; we do not show the OKP icon/popup and then silently fail to fill.
+;; The markers cover Flutter web across versions.
+(def ^:private flutter-markers-query
+  "flutter-view, flt-glass-pane, flt-scene-host, flt-semantics-host, flt-semantics")
+
+(defn- flutter-canvas-page? []
+  (boolean (js/document.querySelector flutter-markers-query)))
+
 (defn identify-page [& {:keys [root]}]
 
   (okp-println "Trying to identify the page as Login or not")
 
-  (let [root (or root js/document)
+  (if (flutter-canvas-page?)
+    (okp-println "Skipping Flutter-canvas page; DOM autofill is not supported here")
+
+    (let [root (or root js/document)
         all-inputs  (get-all-input-elements root)
         all-relevant-inputs (filter-relevant-inputs all-inputs)]
     (when-not (empty? all-relevant-inputs)
@@ -391,31 +407,185 @@
 
                 (messaging-event/send-login-fields-identified {})
 
-                (input-field-okp-icon/add-page-inputs-event-listeners page-info)))))))))
+                (input-field-okp-icon/add-page-inputs-event-listeners page-info))))))))))
+
+;; Sets an input's value via the prototype's native setter instead of a plain
+;; property assignment. Frameworks like React track the input's value internally
+;; and ignore a direct (j/assoc! input :value ...); calling the native setter
+;; updates the real DOM value so the subsequent input event is honored.
+;; See https://stackoverflow.com/questions/40894637/how-to-programmatically-fill-input-elements-built-with-react
+(defn- native-set-input-value! [input value]
+  (let [proto (j/get-in js/window [:HTMLInputElement :prototype])
+        setter (some-> (js/Object.getOwnPropertyDescriptor proto "value")
+                       (j/get :set))]
+    (if setter
+      (j/call setter :call input value)
+      (j/assoc! input :value value))))
+
+;; Fills a single input. Frameworks like React/Vue track an input's value
+;; internally and ignore a plain property assignment, so we set the value through
+;; the prototype's native setter and then dispatch an InputEvent carrying
+;; :inputType/:data plus a change event - close enough to real typing for those
+;; frameworks to pick up the value. Works in every browser (no execCommand).
+;;
+;; We deliberately do NOT focus the input. Focusing fires our own focus listener
+;; (which reopens the entry-list popup while the field is still blank) and leaves
+;; the field focused, racing with the show/hide message round trip. Focus was only
+;; ever needed for canvas frameworks like Flutter web, which identify-page already
+;; skips as unfillable - so there is nothing here that needs it.
+(defn- fill-one-input! [input value]
+  (native-set-input-value! input value)
+  (j/call input :dispatchEvent
+          (js/InputEvent. "input" #js {:bubbles true
+                                       :inputType "insertText" :data value}))
+  (j/call input :dispatchEvent (js/Event. "change" #js {:bubbles true})))
+
+;; Our own injected overlays are custom elements whose tag name starts with OKP-
+;; (okp-entry-list-element, okp-message-box-element, okp-input-icon). The
+;; entry-list popup is anchored over the login fields, so at fill time it can sit
+;; on top of the very input we are about to fill. Covering a field with our own
+;; UI is not attacker occlusion, so the hit-test must look past these.
+(defn- own-extension-element? [el]
+  (let [tag (and el (j/get el :tagName))]
+    (boolean (and tag (.startsWith tag "OKP-")))))
+
+;; elementFromPoint stops at a shadow host - it returns the host, not the element
+;; nested inside an open shadow root. We drill into open shadow roots so an input
+;; that lives inside shadow DOM (e.g hbomax, troweprice) resolves to the actual
+;; element rather than its host. Closed shadow roots cannot be pierced (shadowRoot
+;; is nil), so the walk stops at the host - which is treated as acceptable for an
+;; input whose own root is that host.
+(defn- pierce-shadow-from [el x y]
+  (loop [el el]
+    (let [sr (and el (j/get el :shadowRoot))]
+      (if (nil? sr)
+        el
+        (let [inner (j/call sr :elementFromPoint x y)]
+          (if (or (nil? inner) (= inner el))
+            el
+            (recur inner)))))))
+
+;; Topmost real page element at (x,y). elementsFromPoint returns the full stacked
+;; list top-to-bottom, so we drop our own overlays (the popup can cover the field)
+;; and take the first remaining element, then pierce into its open shadow root so
+;; a shadow-nested input still resolves.
+(defn- page-element-at [doc x y]
+  (let [stack (j/call doc :elementsFromPoint x y)
+        el (first (remove own-extension-element? (array-seq stack)))]
+    (when el
+      (pierce-shadow-from el x y))))
+
+;; True when 'ancestor' is 'node' itself or appears in node's composed ancestor
+;; chain - walking parentNode and crossing shadow boundaries via a shadow root's
+;; host. Used so a wrapper element or the input's shadow host counts as the same
+;; control, not as a foreign overlay.
+(defn- composed-ancestor? [node ancestor]
+  (loop [n node]
+    (cond
+      (nil? n) false
+      (= n ancestor) true
+      :else (recur (or (j/get n :parentNode) (j/get n :host))))))
+
+;; True when 'el' (or one of its ancestors) is a <label> whose labelled control
+;; is the input. Material-style floating labels (e.g login.minted.com) overlay
+;; the whole field with a <label for=...> that is associated with - but not a DOM
+;; ancestor of - the input, so it would otherwise read as a foreign overlay.
+(defn- label-for-input? [input el]
+  (loop [n el]
+    (cond
+      (nil? n) false
+      (and (= "LABEL" (j/get n :tagName))
+           (identical? (j/get n :control) input)) true
+      :else (recur (j/get n :parentNode)))))
+
+;; True when the topmost element at a hit point is the input itself, a descendant
+;; of it (an inner span of the control), a composed ancestor / shadow host of the
+;; input, or a <label> bound to it - i.e. the same control rather than a foreign
+;; overlay.
+(defn- hit-relates-to-input? [input hit]
+  (boolean
+   (and hit
+        (or (= hit input)
+            (j/call input :contains hit)
+            (composed-ancestor? input hit)
+            (label-for-input? input hit)))))
+
+;; Hit-tests the input and confirms it is not covered by a foreign overlay -
+;; something checkVisibility and a non-zero rect cannot detect (an attacker can
+;; overlay a real input while it still passes both). A zero-size rect, or points
+;; that all land on nothing / on a foreign element, is treated as unsafe.
+;;
+;; We sample several points across the field, not only the centre: a legitimate
+;; field often has part of its surface covered by a *same-control* element that
+;; is not the input in the composed tree - a floating label, a leading/trailing
+;; icon, a show-password toggle. Sampling accepts the fill when any point resolves
+;; to the input, while an attacker overlay that fully covers the field still fails
+;; every point - so the occlusion guarantee is preserved. Our own popup is looked
+;; past (see page-element-at) and shadow-nested inputs are not falsely rejected.
+(defn- input-unobscured? [input]
+  (let [rect (j/call input :getBoundingClientRect)
+        w (j/get rect :width)
+        h (j/get rect :height)
+        left (j/get rect :left)
+        top (j/get rect :top)]
+    (if (or (<= w 0) (<= h 0))
+      false
+      (let [doc (j/get input :ownerDocument)
+            ;; mid-height, sampled left / centre / right across the field
+            y (+ top (/ h 2))
+            xs [(+ left (* w 0.15)) (+ left (* w 0.5)) (+ left (* w 0.85))]]
+        (boolean
+         (some (fn [x]
+                 (hit-relates-to-input? input (page-element-at doc x y)))
+               xs))))))
+
+;; Fill-time safety gate. The page can change between field detection and the
+;; user's selection, so we re-check at the moment of filling: the input must
+;; still be visible (checkVisibility + opacity) and not covered by an overlay.
+;; Defeats the transparent / off-screen / overlaid login-form trick where a
+;; credential would otherwise be written into a field the user cannot see.
+(defn- safe-to-fill? [input]
+  (and (is-input-visible? input)
+       (input-unobscured? input)))
 
 ;; Callback fn that is called when the content script receives the basic entry detail from the background
 (defn fill-inputs [{:keys [username password] :as _args}]
   #_(okp-println "In fill-inputs received args" _args)
 
-  (when-some [input (context/username-in-page)]
+  ;; Suppress our focus/input listeners for the duration of the fill so the
+  ;; programmatic focus + input events do not reopen the entry-list popup.
+  ;; dispatchEvent and focus are synchronous, so the listeners only fire within
+  ;; this window. try/finally so a fill error never leaves the flag stuck on
+  ;; (which would permanently disable the popup).
+  (input-field-okp-icon/set-suppress-listeners! true)
+  ;; Track whether an existing target field was skipped because it was
+  ;; hidden / covered at fill time, so we can tell the user why a fill was
+  ;; partial instead of silently leaving a field blank.
+  (let [skipped? (atom false)]
+    (try
+      ;; Only fill a field that is still visible and not covered by an overlay at
+      ;; fill time (see safe-to-fill?). An unsafe field is skipped rather than
+      ;; filled into something the user cannot see.
+      (when-some [input (context/username-in-page)]
+        (if (safe-to-fill? input)
+          (fill-one-input! input username)
+          (reset! skipped? true)))
 
-    ;; First we set the input's value prop
-    (j/assoc! input :value username)
+      (when-some [input (context/password-in-page)]
+        (if (safe-to-fill? input)
+          (fill-one-input! input password)
+          (reset! skipped? true)))
+      (finally
+        (input-field-okp-icon/set-suppress-listeners! false)))
 
-    ;; https://stackoverflow.com/questions/40894637/how-to-programmatically-fill-input-elements-built-with-react
-    ;; https://stackoverflow.com/questions/66536154/changing-input-text-of-a-react-app-using-javascript
+    ;; Fields are filled now; close the entry-list popup explicitly (the
+    ;; suppressed input-entry-listener would otherwise have done this hide).
+    (messaging-event/hide-entry-list)
 
-    ;; Manually trigger the input and change events on the element. This mimics the events that 
-    ;; fire when a user types into an input field.
-    ;; The bubbles: true option ensures that the events propagate up the DOM tree, allowing any 
-    ;; parent elements or event listeners attached to them to react to the change
-    (j/call input :dispatchEvent (js/Event. "input" #js {:bubbles true}))
-    (j/call input :dispatchEvent (js/Event. "change" #js {:bubbles true})))
-
-  (when-some [input (context/password-in-page)]
-    (j/assoc! input :value password)
-    (j/call input :dispatchEvent (js/Event. "input" #js {:bubbles true}))
-    (j/call input :dispatchEvent (js/Event. "change" #js {:bubbles true}))))
+    ;; If a field existed but was skipped as unsafe, show a small note so the
+    ;; user understands why only part (or none) of the credential was filled.
+    (when @skipped?
+      (messaging-event/show-fields-not-filled-message))))
 
 ;; Few sites have relevant inputs inside shadowdoms
 ;; e.g hbomax, troweprice etc. The following ensures that we get them also

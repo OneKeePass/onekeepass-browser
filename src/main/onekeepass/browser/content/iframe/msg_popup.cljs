@@ -17,15 +17,25 @@
 
 (defn- no-matching-entries-info []
   (let [url @(iframe-content-messaging/no-matching-recent-url)]
-    [mui-stack {:sx {:text-align "center" :align-items "center"}}
-     [mui-typography {:variant "body1" :color "warning.dark" :sx {}}
+    [mui-stack {:spacing 1 :sx {:text-align "center" :align-items "center"}}
+     [mui-typography {:variant "body1" :color "warning.dark"}
       (u/lstr "noMatchingEntry")]
 
-     [mui-stack {:sx {:mt 1 :mb 1}}
-      [mui-typography {:variant "body1" :color "primary.main" :sx {}}
-       url]
-      [mui-typography {:variant "body1" :color "primary.main" :sx {}}
-       "Please add this url to a relevant login entry"]]]))
+     ;; Login urls (e.g OAuth redirect urls) can be long and have no spaces to
+     ;; break at; break on any character so the url wraps cleanly within the box
+     ;; instead of overflowing or breaking at ragged points. body2 keeps a long
+     ;; url from dominating the box.
+     ;; Highlight the url with its own colour and a subtle tinted background so
+     ;; it stands apart from the warning heading above and the instruction below.
+     [mui-typography {:variant "body2"
+                      :color "success.dark"
+                      :sx {:wordBreak "break-all"
+                           :px 1 :py 0.5
+                           :bgcolor "action.hover"
+                           :borderRadius 1}}
+      url]
+     [mui-typography {:variant "body1" :color "primary.main"}
+      (u/lstr "addUrlToEntry")]]))
 
 (defn- background-error-info [error-message]
   [mui-stack {:sx {:text-align "center" :align-items "center"}}
@@ -37,14 +47,23 @@
    [mui-typography {:variant "body1" :color "warning.dark" :sx {}}
     "No saved passkeys found for this site in OneKeePass."]])
 
+;; Shown when a login field was skipped during fill because it was hidden
+;; or covered at fill time (see safe-to-fill? in form_fields). Explains a partial
+;; or empty fill so the user is not left wondering why it did not fill.
+(defn- fields-not-filled-info []
+  [mui-stack {:sx {:text-align "center" :align-items "center"}}
+   [mui-typography {:variant "body1" :color "warning.dark"}
+    (u/lstr "fieldsNotFilled")]])
+
 (defn msg-box-main-content []
   (let [no-browser-enabled-db @(iframe-content-messaging/no-browser-enabled-db)
         no-matching-entries   @(iframe-content-messaging/no-matching-entries)
         no-matching-passkeys  @(iframe-content-messaging/no-matching-passkeys)
+        fields-not-filled     @(iframe-content-messaging/fields-not-filled)
         background-error      @(iframe-content-messaging/background-error)]
     ;; (u/okp-println "=== no-browser-enabled-db no-matching-entries background-error" no-browser-enabled-db no-matching-entries background-error)
 
-    (when (or no-browser-enabled-db no-matching-entries no-matching-passkeys background-error)
+    (when (or no-browser-enabled-db no-matching-entries no-matching-passkeys fields-not-filled background-error)
       [mui-box {:sx
                 {:bgcolor  "background.paper"
                  :border-color "black"
@@ -89,6 +108,9 @@
 
            no-matching-passkeys
            [no-matching-passkeys-info]
+
+           fields-not-filled
+           [fields-not-filled-info]
 
            (not (nil? background-error))
            [background-error-info background-error])]]])))

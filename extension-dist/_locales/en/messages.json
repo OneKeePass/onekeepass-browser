@@ -9,14 +9,34 @@
         "description": "Indicates that the extension is connected to the main installed OneKeePass app"
     },
 
+    "redetectLoginFields": {
+        "message": "Redetect login fields",
+        "description": "Button on the connected popup that re-scans the current page for login fields"
+    },
+
     "noDbAvailable": {
         "message": "Please open a browser connection enabled database and then try",
         "description":"No database is yet opened"
     },
 
     "noMatchingEntry": {
-        "message":"No matching entry is found for this login url in any of the opened databases",
+        "message":"No matching entry was found for this login URL in any open database",
         "description":"No matching entry is found for the url"
+    },
+
+    "addUrlToEntry": {
+        "message":"Please add this URL to the URL or Additional URLs field of a relevant login entry",
+        "description":"Tells the user how to make this login URL match an entry"
+    },
+
+    "fieldsNotFilled": {
+        "message":"Some fields were not filled because they are hidden or covered",
+        "description":"Shown when a login field is skipped during autofill for safety"
+    },
+
+    "embeddedLoginFrom": {
+        "message":"Embedded login from",
+        "description":"Label above the cross-origin frame origin a credential will be filled into; shown only when the login fields are in an embedded (cross-origin) iframe"
     },
 
     "appIsNotRunning": {

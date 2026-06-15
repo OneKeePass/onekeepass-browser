@@ -42,8 +42,22 @@
 
 (reg-event-fx
  :content/entry-list-loaded
- (fn [{:keys [_db]} [_event_id {:keys [browser-enabled-db-available matched-entries url]} request-id]]
-   (let [some-matched-entries (some (fn [{:keys [entry-summaries]}] (not-empty entry-summaries)) matched-entries)]
+ (fn [{:keys [db]} [_event_id {:keys [browser-enabled-db-available matched-entries url]} request-id]]
+   (let [some-matched-entries (some (fn [{:keys [entry-summaries]}] (not-empty entry-summaries)) matched-entries)
+         req (get-in db [:reques-ids request-id])
+         ;; When the login fields are inside a nested iframe (frame-id is a positive
+         ;; value), rendering the entry list popup in that frame gets clipped by the
+         ;; small cross-origin iframe (e.g Charles schwab). In that case we render the
+         ;; popup in the main frame (frame 0) at a fixed position instead.
+         in-sub-frame? (let [fid (:frame-id req)]
+                         (and fid (not (zero? fid))))
+         ;; The fill-target-origin is the origin of the frame the credential will be
+         ;; typed into (the login-field frame); top-origin is the top page. Equal
+         ;; for top-frame logins, different for cross-origin sub-frame logins. Shown
+         ;; in the popup so the user can notice when a login is embedded.
+         fill-target-origin (cmn-event/url->origin (:frame-url req))
+         top-origin (cmn-event/url->origin (:tab-url req))]
+     #_(u/okp-println "Matched entries" some-matched-entries)
      #_(u/okp-println "empty some-matched-entries val is " (empty? some-matched-entries) "request-id" request-id)
      (cond
        (= browser-enabled-db-available false)
@@ -56,9 +70,14 @@
        {:fx [[:dispatch [:common/send-tab-message-for-request-id
                          {:message-type NO_MATCHING_ENTRIES :url url} request-id true]]]}
        :else
+       ;; When login is in a sub-frame, route to the main frame (last arg true) and
+       ;; flag the popup to use a fixed position since there is no focused input there
        {:fx [[:dispatch [:common/send-tab-message-for-request-id
                          {:message-type SHOW_ENTRY_LIST
-                          :matched-entries matched-entries} request-id]]]}))))
+                          :matched-entries matched-entries
+                          :fixed-position in-sub-frame?
+                          :fill-target-origin fill-target-origin
+                          :top-origin top-origin} request-id in-sub-frame?]]]}))))
 
 (reg-event-fx
  :content/basic-entry-info-loaded
