@@ -15,3 +15,5 @@ pom.xml.asc
 .shadow-cljs
 .clj-kondo
 .lsp
+node_modules/
+extension-dist/js/

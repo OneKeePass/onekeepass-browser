@@ -14,7 +14,11 @@
   [applied-science/js-interop "0.4.2"]]
 
  :builds
- {:extension-dist
+ {:test
+  {:target :node-test
+   :output-to "target/security-tests.js"
+   :ns-regexp "-test$"}
+  :extension-dist
   {:target :esm
    :output-dir "extension-dist/js"
    :runtime :custom
