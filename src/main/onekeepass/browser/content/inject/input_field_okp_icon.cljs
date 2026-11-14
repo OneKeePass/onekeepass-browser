@@ -9,9 +9,18 @@
    [onekeepass.browser.content.iframe.start :as ifs]
    [onekeepass.browser.content.events.messaging :as messaging-event]
    [onekeepass.browser.content.inject.custom-element :as ce]
+   [onekeepass.browser.content.inject.input-icon-lifecycle :as lifecycle]
    [onekeepass.browser.content.inject.listener-store :as listener-store]))
 
 (def ^:private host-element-class ce/OKP_INPUT_ICON_CLASS)
+
+(def ^:private stop-icon-tracking (atom nil))
+
+(defn remove-input-okp-icon! []
+  (when-let [stop! @stop-icon-tracking]
+    (reset! stop-icon-tracking nil)
+    (stop!))
+  (ce/remove-shadowdom-host-element-by-class host-element-class))
 
 (def ^:private okp-svg-icon
   "<svg viewBox=\"0 0 52.916668 52.916668\" xmlns=\"http://www.w3.org/2000/svg\">
@@ -203,14 +212,11 @@
                                (j/call input :focus)
                                (messaging-event/send-get-entry-list true)))
 
-          ;; Reposition on scroll/resize
-          (let [handler (fn []
-                          (set-icon-position input component-root size))]
-
-            ;; Uses EventTarget: addEventListener() method
-            (doto js/window
-              (.addEventListener "resize" handler)
-              (.addEventListener "scroll" handler))))))))
+          (reset! stop-icon-tracking
+                  (lifecycle/track-input-icon!
+                   input host-element
+                   #(set-icon-position input component-root size)
+                   remove-input-okp-icon!)))))))
 
 
 (defn show-input-okp-icon [input]
@@ -218,7 +224,7 @@
   #_(u/okp-console-log "In show-input-okp-icon:Received username input obj is .. " input)
 
   (when (and (not (nil? input)) (instance? js/HTMLInputElement input))
-    (ce/remove-shadowdom-host-element-by-class host-element-class)
+    (remove-input-okp-icon!)
     (add-icon-to-input input)))
 
 
