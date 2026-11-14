@@ -102,7 +102,9 @@
          (dispatch [:received-no-matching-passkeys message-data])
 
          SELECTED_ENTRY_DETAIL
-         (dispatch [:received-seleted-entry-basic-info message-data])
+         (when (and (string? (:expected-fill-origin message-data))
+                    (= (:expected-fill-origin message-data) (.-origin js/window.location)))
+           (dispatch [:received-seleted-entry-basic-info message-data]))
 
          CUSTOM_ICON_LOADED
          (dispatch [:received-custom-icon-loaded message-data])
@@ -217,7 +219,7 @@
    (dispatch [:send-get-entry-list user-initiated?])))
 
 (defn send-entry-selected [db-key entry-uuid]
-  (dispatch [:send-entry-selected db-key entry-uuid])
+  (dispatch [:send-entry-selected db-key entry-uuid @(subscribe [:selection-id])])
   #_(js/chrome.runtime.sendMessage  (clj->js {:message-type ENTRY_SELECTED
                                               :db-key db-key
                                               :entry-uuid entry-uuid})))
@@ -323,10 +325,11 @@
 ;; Sends a message to the background to get basic entry detail for the selected entry uuid
 (reg-event-fx
  :send-entry-selected
- (fn [{:keys [db]} [_event-id db-key entry-uuid]]
+ (fn [{:keys [db]} [_event-id db-key entry-uuid selection-id]]
    {:db (-> db (assoc-in [:entry-selected-done] true))
     :fx [[:common/send-bg-message-regfx {:message-type ENTRY_SELECTED
                                          :db-key db-key
+                                         :selection-id selection-id
                                          :entry-uuid entry-uuid}]]}))
 
 (reg-event-fx
@@ -415,7 +418,7 @@
 (reg-event-fx
  :matched-entries-loaded
  (fn [{:keys [db]} [_event-id {:keys [message-type matched-entries fixed-position
-                                      fill-target-origin top-origin]}]]
+                                      fill-target-origin top-origin selection-id]}]]
    ;; matched-entries is a vec of map from vec of struct 'MatchedDbEntries'
    ;; fixed-position is true when the login fields are in a sub-frame and the popup
    ;; is rendered in this (main) frame at a fixed location instead of anchored to an input
@@ -424,6 +427,7 @@
    {:db (-> db
             (assoc-in [:entry-selected-done] false)
             (assoc-in [:matched-entries] matched-entries)
+            (assoc :selection-id selection-id)
             (assoc-in [:entry-list-fixed-position] fixed-position)
             (assoc-in [:fill-target-origin] fill-target-origin)
             (assoc-in [:top-origin] top-origin)
@@ -439,7 +443,8 @@
 (reg-event-fx
  :passkey-list-loaded
  (fn [{:keys [db]} [_event-id {:keys [message-type matched-entries]}]]
-   {:db (-> db (assoc-in [:matched-entries] matched-entries))
+   {:db (-> db (assoc-in [:matched-entries] matched-entries)
+               (dissoc :selection-id))
     :fx [[:execute-message-handler-regfx [(get-in db [:message-handlers message-type]) nil]]]}))
 
 ;; Entry list mui box is hidden (shadow dom host removed)
@@ -579,6 +584,11 @@
  :fields-not-filled
  (fn [db [_event-id]]
    (-> db (get :fields-not-filled))))
+
+(reg-sub
+ :selection-id
+ (fn [db _]
+   (:selection-id db)))
 
 (reg-sub
  :matched-entries

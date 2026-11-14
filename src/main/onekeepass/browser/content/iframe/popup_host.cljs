@@ -1,6 +1,7 @@
 (ns onekeepass.browser.content.iframe.popup-host
   (:require
    [applied-science.js-interop :as j]
+   [onekeepass.browser.common.frame-security :as frame-security]
    [onekeepass.browser.common.message-type-names :refer [CLOSE_ENTRY_LIST_POPUP
                                                          CLOSE_PASSKEY_CREATE_POPUP
                                                          CLOSE_POPUP
@@ -153,7 +154,7 @@
 
 (defn- create-iframe [{:keys [src width height]}]
   (let [iframe (js/document.createElement "iframe")]
-    (j/assoc! iframe :src src)
+    (j/assoc! iframe :src (str src "#okp-channel=" (frame-security/new-popup-channel-token)))
     (j/assoc! iframe :scrolling "no")
     (j/assoc-in! iframe
                  [:style :cssText]

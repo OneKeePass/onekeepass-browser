@@ -2,6 +2,7 @@
   "All events that handle content script specific ones are implemented here"
   (:require
    [onekeepass.browser.background.events.common :as cmn-event]
+   [onekeepass.browser.common.frame-security :as frame-security]
    [onekeepass.browser.common.message-type-names :refer [CONTENT_FRAME_ID
                                                          NO_BROWSER_ENABLED_DB
                                                          NO_MATCHING_ENTRIES
@@ -56,25 +57,38 @@
          ;; for top-frame logins, different for cross-origin sub-frame logins. Shown
          ;; in the popup so the user can notice when a login is embedded.
          fill-target-origin (cmn-event/url->origin (:frame-url req))
-         top-origin (cmn-event/url->origin (:tab-url req))]
+         top-origin (cmn-event/url->origin (:tab-url req))
+         selection (when (and req (frame-security/web-origin (:frame-url req)))
+                     (assoc req
+                            :selection-id request-id
+                            :popup-frame-id (if in-sub-frame? 0 (:frame-id req))
+                            :entry-ids (frame-security/offered-entry-ids matched-entries)))
+         db (if req
+              (update-in db [:tabs (:tab-id req)] dissoc :autofill-selection)
+              db)]
      #_(u/okp-println "Matched entries" some-matched-entries)
      #_(u/okp-println "empty some-matched-entries val is " (empty? some-matched-entries) "request-id" request-id)
      (cond
        (= browser-enabled-db-available false)
        ;; Last argument ensures that the msg popup is shown in main frame
-       {:fx [[:dispatch [:common/send-tab-message-for-request-id
+       {:db db :fx [[:dispatch [:common/send-tab-message-for-request-id
                          {:message-type NO_BROWSER_ENABLED_DB} request-id true]]]}
 
        (empty? some-matched-entries)
        ;; Last argument ensures that the msg popup is shown in main frame
-       {:fx [[:dispatch [:common/send-tab-message-for-request-id
+       {:db db :fx [[:dispatch [:common/send-tab-message-for-request-id
                          {:message-type NO_MATCHING_ENTRIES :url url} request-id true]]]}
+       (nil? selection)
+       {}
+
        :else
        ;; When login is in a sub-frame, route to the main frame (last arg true) and
        ;; flag the popup to use a fixed position since there is no focused input there
-       {:fx [[:dispatch [:common/send-tab-message-for-request-id
+       {:db (assoc-in db [:tabs (:tab-id req) :autofill-selection] selection)
+        :fx [[:dispatch [:common/send-tab-message-for-request-id
                          {:message-type SHOW_ENTRY_LIST
                           :matched-entries matched-entries
+                          :selection-id request-id
                           :fixed-position in-sub-frame?
                           :fill-target-origin fill-target-origin
                           :top-origin top-origin} request-id in-sub-frame?]]]}))))
@@ -111,12 +125,20 @@
 (reg-event-fx
  :content/web-navigation-committed
  (fn [{:keys [db]} [_event_id tab-id frame-id url]]
-   (if (= 0 frame-id)
-     {:db  (-> db (assoc-in [:tabs tab-id] {:tab-url url :login-field-frame nil}))}
-     #_(do
-         (println "content/web-navigation-committed  current-tab-id is " (get db :current-tab-id))
-         {:db  (-> db (assoc-in [:tabs tab-id] {:tab-url url :login-field-frame nil}))})
-     {})))
+   (let [selection (get-in db [:tabs tab-id :autofill-selection])
+         db (if (or (zero? frame-id) (= frame-id (:frame-id selection)))
+              (update-in db [:tabs tab-id] dissoc :autofill-selection)
+              db)
+         db (update db :reques-ids
+                    (fn [requests]
+                      (into {} (remove (fn [[_ target]]
+                                         (and (= tab-id (:tab-id target))
+                                              (or (zero? frame-id)
+                                                  (= frame-id (:frame-id target))))))
+                            requests)))]
+     {:db (if (zero? frame-id)
+            (assoc-in db [:tabs tab-id] {:tab-url url :login-field-frame nil})
+            db)})))
 
 #_(reg-event-fx
    :content/tab-updated

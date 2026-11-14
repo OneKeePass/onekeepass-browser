@@ -94,7 +94,8 @@
       (dispatch [:execute-iframe-message-type message-data])
       
       ENTRY_SELECTED
-      (dispatch [:send-entry-selected (:db-key message-data) (:entry-uuid message-data)])
+      (dispatch [:send-entry-selected (:db-key message-data) (:entry-uuid message-data)
+                 (:selection-id message-data)])
 
       GET_CUSTOM_ICON
       (dispatch [:send-get-custom-icon (:db-key message-data) (:custom-icon-uuid message-data)])
@@ -213,7 +214,7 @@
 (reg-event-fx
  :content-iframe/matched-entries-loaded
  (fn [{:keys [db]} [_event-id]]
-   (let [message-data (select-keys db [:matched-entries :fill-target-origin :top-origin])
+   (let [message-data (select-keys db [:matched-entries :fill-target-origin :top-origin :selection-id])
          message-data (merge {:message-type SHOW_ENTRY_LIST} message-data)]
      #_(u/okp-println "Sending entries data of SHOW_ENTRY_LIST" message-data "to iframe")
      {:fx [[:common/send-iframe-message-regfx message-data]]})))
