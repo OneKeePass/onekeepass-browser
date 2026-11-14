@@ -99,7 +99,8 @@
   ;; This messsage flow is iframe -> content -> background -> content
   (iframe-content-conn/send-message-to-content {:message-type ENTRY_SELECTED
                                                 :db-key db-key
-                                                :entry-uuid entry-uuid}))
+                                                :entry-uuid entry-uuid
+                                                :selection-id @(subscribe [:iframe-selection-id])}))
 
 (defn send-get-custom-icon [db-key custom-icon-uuid]
   (u/okp-println "Sending from content to iframe GET_CUSTOM_ICON message")
@@ -249,11 +250,17 @@
 
 (reg-event-fx
  :iframe-matched-entries-loaded
- (fn [{:keys [db]} [_event_id {:keys [matched-entries fill-target-origin top-origin]}]]
+ (fn [{:keys [db]} [_event_id {:keys [matched-entries fill-target-origin top-origin selection-id]}]]
    {:db (-> db
             (assoc-in [:iframe :matched-entries] matched-entries)
+            (assoc-in [:iframe :selection-id] selection-id)
             (assoc-in [:iframe :fill-target-origin] fill-target-origin)
             (assoc-in [:iframe :top-origin] top-origin))}))
+
+(reg-sub
+ :iframe-selection-id
+ (fn [db _]
+   (get-in db [:iframe :selection-id])))
 
 (reg-sub
  :iframe-matched-entries

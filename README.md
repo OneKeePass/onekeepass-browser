@@ -14,6 +14,13 @@ A basic [User Guide ](docs/user-guide.md) is available explaining how to use thi
 
 ## Build
 
+### Tests
+
+With Java and Node.js installed, run `npm ci` followed by `npm test`.
+The Node test suite covers autofill frame/document routing, navigation invalidation,
+entry selection authorization, and the popup MessageChannel handshake. It uses
+synthetic URLs and credentials and does not access a browser profile or database.
+
 ### Firefox build
 ```npm run firefox```
 

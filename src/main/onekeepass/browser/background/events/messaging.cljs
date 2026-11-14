@@ -2,6 +2,7 @@
   (:require
    [applied-science.js-interop :as j]
    [clojure.string :as str]
+   [onekeepass.browser.common.frame-security :as frame-security]
    [onekeepass.browser.background.crypto :as cryto]
    [onekeepass.browser.background.events.common :as bg-cmn-event :refer [ASSOCIATE
                                                                          DB_GROUP_ENTRIES_FOR_PASSKEY
@@ -177,23 +178,9 @@
                 (assoc-in [:app-connection :state] NATIVE_APP_NOT_AVAILABLE))})))
 
 (defn- form-url-to-match
-  "Builds the url used by the app to match entries from the browser tab url.
-   Returns the origin only (scheme + host + optional non-default port), dropping
-   the path, query string and fragment. Falls back to the raw tab-url when it
-   cannot be parsed (e.g a non standard scheme or a blank url).
-
-   Interim measure: the core matcher (url_matched) compares scheme + host + exact
-   path. Sending the origin (path normalises to '/') makes matching effectively
-   scheme + host, so an entry whose stored URL is the bare domain matches, and
-   login flows on a different host/path (e.g OAuth redirect urls like
-   signin.costco.com/<transient-path>) become matchable by adding the stable
-   login origin to the entry's 'Additional URLs'. Once core relaxes the path
-   requirement,restore the scheme + host + path version commented below."
-  [tab-url]
-  (try
-    (.-origin (js/URL. tab-url))
-    (catch :default _e
-      tab-url)))
+  "Match the HTTP(S) origin of the frame containing the login fields."
+  [frame-url]
+  (frame-security/web-origin frame-url))
 
 ;; Previous implementation: scheme + hostname + optional non-default port + path
 ;; (query and fragment dropped). Kept for when core's url_matched is relaxed so
@@ -213,13 +200,15 @@
 
 (reg-event-fx
  :get-entry-list
- (fn [{:keys [db]} [_event-id {:keys [tab-id frame-id tab-url frame-url user-initiated] :as _sender-info}]]
-   (u/okp-println "Form url formed is" (form-url-to-match tab-url) "from tab-url" tab-url)
+ (fn [{:keys [db]} [_event-id {:keys [tab-id frame-id tab-url frame-url document-id user-initiated] :as _sender-info}]]
    #_(u/okp-println "get-entry-list form-url " form-url " tab-id " tab-id " frame-id " frame-id)
    (let [request-id (bg-cmn-event/generate-request-id)
          association-id (get db :association-id)
          app-port (get-app-port db)]
      (cond
+       (nil? (form-url-to-match frame-url))
+       {}
+
        ;; App not connected and this was an automatic (focus/typing) request — stay silent.
        ;; The login field icon remains as the cue; the user can click it to bring up the
        ;; connect dialog on demand, instead of being prompted on every login field.
@@ -237,28 +226,27 @@
        ;; fill-target origin (#6). They are equal for top-frame logins and differ
        ;; for cross-origin sub-frame logins.
        {:db (-> db (assoc-in [:reques-ids request-id] {:tab-id tab-id :frame-id frame-id
-                                                       :tab-url tab-url :frame-url frame-url}))
+                                                       :tab-url tab-url :frame-url frame-url
+                                                       :document-id document-id}))
         :fx [[:dispatch [:send-app-request {:action ENABLED_DATABASE_MATCHED_ENTRY_LIST
                                             :request-id request-id
-                                            ;; The form-url from tab-url instead of frame-url is used by the app to match the entries
-                                            :form-url (form-url-to-match tab-url) #_frame-url} true]]]}))))
+                                            :form-url (form-url-to-match frame-url)} true]]]}))))
 
 (reg-event-fx
  :load-selected-entry-detail
- (fn [{:keys [db]} [_event-id {:keys [tab-id frame-id]} {:keys [db-key entry-uuid]}]]
-   (let [request-id (bg-cmn-event/generate-request-id)
-         ;; The fill (SELECTED_ENTRY_DETAIL) must target the frame that holds the login
-         ;; fields. When the popup is rendered in the main frame (login fields are in a
-         ;; sub-frame, e.g Charles schwab), the ENTRY_SELECTED sender frame-id is the
-         ;; main frame (0), not the input's frame. Prefer the recorded login-field-frame
-         ;; so the fill reaches the actual input; fall back to the sender frame-id.
-         login-field-frame (get-in db [:tabs tab-id :login-field-frame])
-         frame-id (or login-field-frame frame-id)]
-     {:db (-> db (assoc-in [:reques-ids request-id] {:tab-id tab-id :frame-id frame-id}))
-      :fx [[:dispatch [:send-app-request {:action SELECTED_ENTRY
-                                          :request-id request-id
-                                          :db-key db-key
-                                          :entry-uuid entry-uuid} true]]]})))
+ (fn [{:keys [db]} [_event-id {:keys [tab-id] :as sender-info}
+                   {:keys [db-key entry-uuid] :as entry-info}]]
+   (if-let [target (frame-security/selected-target
+                    (get-in db [:tabs tab-id :autofill-selection]) sender-info entry-info)]
+     (let [request-id (bg-cmn-event/generate-request-id)]
+       {:db (-> db
+                (update-in [:tabs tab-id] dissoc :autofill-selection)
+                (assoc-in [:reques-ids request-id] target))
+        :fx [[:dispatch [:send-app-request {:action SELECTED_ENTRY
+                                           :request-id request-id
+                                           :db-key db-key
+                                           :entry-uuid entry-uuid} true]]]})
+     {})))
 
 (reg-event-fx
  :get-custom-icon
@@ -303,7 +291,9 @@
  :route-entry-selected
  (fn [{:keys [db]} [_event-id sender-info entry-info]]
    (let [pending (get db :pending-webauthn)]
-     (if (and pending (= (:type pending) :get))
+     (if (and pending (= (:type pending) :get)
+              (nil? (:selection-id entry-info))
+              (= (:tab-id sender-info) (:tab-id pending)))
        {:fx [[:dispatch [:passkey/entry-selected entry-info]]]}
        {:fx [[:dispatch [:load-selected-entry-detail sender-info entry-info]]]}))))
 
@@ -636,12 +626,13 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;   extension side message handling with re-frame ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defn select-sender-keys [sender]
-  (let [{:keys [url frameId tab]} (j/lookup sender)
+  (let [{:keys [url frameId documentId tab]} (j/lookup sender)
         tab-id (j/get tab :id)
         tab-url (j/get tab :url)]
     {:tab-id tab-id
      :tab-url tab-url
      :frame-id frameId
+     :document-id documentId
      :frame-url url}))
 
 (defn- received-content-loading [sender send-response]
@@ -743,7 +734,7 @@
          ;; Background gets this message from content script to get the basic entry info from the main app.
          ;; Route to passkey flow if a passkey assertion is pending; otherwise normal password flow.
          ENTRY_SELECTED
-         (dispatch [:route-entry-selected sender-info (select-keys message-data [:db-key :entry-uuid])])
+         (dispatch [:route-entry-selected sender-info (select-keys message-data [:db-key :entry-uuid :selection-id])])
 
          REDETECT_FIELDS
          (dispatch [:common/send-message-to-current-tab
