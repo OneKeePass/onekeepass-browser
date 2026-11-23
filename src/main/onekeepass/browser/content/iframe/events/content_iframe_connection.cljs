@@ -1,6 +1,7 @@
 (ns onekeepass.browser.content.iframe.events.content-iframe-connection
   (:require
    [applied-science.js-interop :as j]
+   [onekeepass.browser.common.frame-security :as frame-security]
    [onekeepass.browser.common.message-type-names :refer [INIT_PORT]]
    [onekeepass.browser.common.utils :as u]))
 
@@ -12,7 +13,9 @@
   ;; Create the Channel
   (let [channel (js/MessageChannel.)
         local-port (.-port1 channel)
-        remote-port (.-port2 channel)]
+        remote-port (.-port2 channel)
+        token (frame-security/popup-channel-token (.-src iframe-element))
+        target-origin (.replace (js/chrome.runtime.getURL "/") #"/$" "")]
 
     ;; Keep our end (local-port)
     ;; Setup listeners just like chrome.runtime.connect
@@ -30,9 +33,10 @@
                        (fn []
                          ;; We send the port as a "Transferable" (3rd argument)
                          (.postMessage (.-contentWindow iframe-element)
-                                       #js {:type INIT_PORT}
-                                       "*"
-                                       #js [remote-port])))
+                                       #js {:type INIT_PORT :channelToken token}
+                                       target-origin
+                                       #js [remote-port]))
+                       #js {:once true})
 
     ;; Start the port (Required for MessageChannel)
     (.start local-port)

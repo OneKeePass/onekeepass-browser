@@ -2,7 +2,8 @@
   (:require
    [camel-snake-kebab.core :as csk]
    [camel-snake-kebab.extras :as cske]
-   [onekeepass.browser.common.message-type-names :refer [BACKGROUND_ERROR]]
+   [onekeepass.browser.common.frame-security :as frame-security]
+   [onekeepass.browser.common.message-type-names :refer [BACKGROUND_ERROR SELECTED_ENTRY_DETAIL]]
    [onekeepass.browser.common.utils :as u]
    [re-frame.core :refer [reg-event-fx reg-fx]]))
 
@@ -85,7 +86,13 @@
 ;; If tab-id is nil, the message will not be sent and error is seen in console
 (defn message-to-tab
   ([tab-id messge-data frame-id]
-   (js/chrome.tabs.sendMessage tab-id (clj->js messge-data) (clj->js {:frameId frame-id})))
+   (message-to-tab tab-id messge-data frame-id nil))
+
+  ([tab-id message-data frame-id document-id]
+   (js/chrome.tabs.sendMessage
+    tab-id (clj->js message-data)
+    (clj->js (cond-> {:frameId frame-id}
+               document-id (assoc :documentId document-id)))))
 
   ([tab-id messge-data]
    (js/chrome.tabs.sendMessage tab-id (clj->js messge-data))))
@@ -208,7 +215,9 @@
  :common/send-tab-message-for-request-id
  (fn [{:keys [db]} [_event_id message-data request-id use-main-frame-id]]
    #_(u/okp-println "In :common/send-tab-message-for-request-id before db keys " (keys db) (get-in db [:reques-ids request-id]))
-   (let [{:keys [tab-id frame-id]} (get-in db [:reques-ids request-id])
+   (let [{:keys [tab-id frame-id frame-url document-id]} (get-in db [:reques-ids request-id])
+         credential? (= SELECTED_ENTRY_DETAIL (:message-type message-data))
+         expected-origin (when credential? (frame-security/web-origin frame-url))
          ;; Need to ensure that any error message popup should be shown in the main frame
          ;; In some site, the frame id may belong to iframe of the input element (e.g Charles schwab)
          ;; And that will block the input element
@@ -216,21 +225,23 @@
          db (if (nil? tab-id) db (update-in db [:reques-ids] dissoc request-id))]
      #_(u/okp-println "In :common/send-tab-message-for-request-id After db keys " (keys db) (get-in db [:reques-ids request-id]))
      #_(u/okp-println "In :common/send-tab-message-for-request-id" "tab-id" tab-id "frame-id"  frame-id "request-id"  request-id)
-     (if (nil? tab-id)
-       {}
+     (if (or (nil? tab-id) (and credential? (nil? expected-origin)))
+       {:db db}
        {:db db
-        :fx [[:common/send-content-message-regfx {:message-data message-data
+        :fx [[:common/send-content-message-regfx {:message-data (cond-> message-data
+                                                                credential? (assoc :expected-fill-origin expected-origin))
                                                   :tab-id tab-id
+                                                  :document-id (when credential? document-id)
                                                   :frame-id frame-id}]]}))))
 
 ;; Called to send a message to the content script when we have tab-id and frame-id
 ;; Typically we have these ids from runtime.MessageSender
 (reg-fx
  :common/send-content-message-regfx
- (fn [{:keys [tab-id frame-id message-data] :as _args}]
+ (fn [{:keys [tab-id frame-id document-id message-data] :as _args}]
    #_(u/okp-println "common/send-content-message-regfx args are " _args)
    ;;(u/okp-println "common/send-content-message-regfx tab-id frame-id message-data are " tab-id message-data)
-   (message-to-tab tab-id message-data frame-id)))
+   (message-to-tab tab-id message-data frame-id document-id)))
 
 #_(reg-event-fx
    :common/send-tab-message-for-request-id

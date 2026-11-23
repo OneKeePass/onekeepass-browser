@@ -16,17 +16,30 @@
   
   #_(u/okp-println "Iframe side init-content-connection is called and message listener is added")
   
-  (js/window.addEventListener
+  (let [expected-token (.get (js/URLSearchParams. (.substring js/window.location.hash 1))
+                            "okp-channel")
+        connected? (atom false)]
+   (js/window.addEventListener
    "message"
    (fn [event]
      #_(u/okp-console-log "Iframe widow message listener recived message event" event)
      ;; https://developer.mozilla.org/en-US/docs/Web/API/Window/message_event
-     (let [data (.-data event)]
+     (let [^js data (.-data event)]
        ;; Check if this is the Handshake
-       (when (= (.-type data) INIT_PORT)
+       (when (and (not @connected?)
+                  (seq expected-token)
+                  (some? data)
+                  ;; Firefox may redact privileged sources. The unguessable
+                  ;; per-popup token is required even when source is available.
+                  (or (nil? (.-source event))
+                      (identical? (.-source event) js/window.parent))
+                  (= (.-type data) INIT_PORT)
+                  (= (.-channelToken data) expected-token)
+                  (= 1 (.-length (.-ports event))))
 
          ;; Grab the transferred port
          (let [port (aget (.-ports event) 0)]
+           (reset! connected? true)
            (reset! direct-port-to-content port)
 
            ;; Setup Listeners (Look how similar this is to chrome.runtime!)
@@ -41,7 +54,7 @@
 
            #_(u/okp-println "Iframe side port is ready")
            ;; Say Hello
-           #_(.postMessage port #js {:type "HELLO" :payload "I am ready"})))))))
+           #_(.postMessage port #js {:type "HELLO" :payload "I am ready"}))))))))
 
 (defn send-message-to-content [message]
   #_(u/okp-println "send-message-to-content is called")
