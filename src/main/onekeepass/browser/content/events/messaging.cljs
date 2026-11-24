@@ -2,6 +2,7 @@
   (:require
    [applied-science.js-interop :as j]
    [onekeepass.browser.common.message-type-names :refer [BACKGROUND_ERROR
+                                                         CLOSE_PASSKEY_POPUP
                                                          CONTENT_FRAME_ID
                                                          CONTENT_LOGIN_FIELDS_IDENTIFIED
                                                          CONTENT_SCRIPT_LOADING
@@ -13,6 +14,7 @@
                                                          NO_BROWSER_ENABLED_DB
                                                          NO_MATCHING_ENTRIES
                                                          NO_MATCHING_PASSKEYS
+                                                         OKP_PASSKEY_ABORT
                                                          OKP_PASSKEY_BROWSER_DEFAULT
                                                          OKP_PASSKEY_CREATE
                                                          OKP_PASSKEY_GET
@@ -21,7 +23,7 @@
                                                          OKP_PASSKEY_RESOLVE_GET
                                                          PASSKEY_CREATE_CANCELLED
                                                          PASSKEY_CREATE_CONFIRMED
-                                                         PASSKEY_CREATE_FALLBACK
+                                                         PASSKEY_USE_BROWSER
                                                          PASSKEY_GET_CANCELLED
                                                          PASSKEY_CREATE_SUCCESS
                                                          PASSKEY_DB_CHOSEN
@@ -64,7 +66,10 @@
      (let [{:keys [message-type] :as message-data} (js->clj message :keywordize-keys true)]
        #_(okp-println "The message-data is " message-data)
 
-       (condp = message-type
+       (condp = (when (or (nil? (:expected-passkey-origin message-data))
+                         (= (:expected-passkey-origin message-data) (.-origin js/location)))
+                  message-type)
+         nil nil
 
          ;; Background sends this message on receving matched entries
          ;; message-data a map with keys [message-type matched-entries]
@@ -131,9 +136,7 @@
          IFRAME_POPUP_ACTION_INITIATE
          (dispatch [:common/execute-message-handler IFRAME_POPUP_ACTION_INITIATE {}])
 
-         ;; Firefox passkey relay: resolve or reject the pending Promise in the MAIN world
-         ;; targetOrigin is window.location.origin (not "*") so only the current page
-         ;; receives the message — prevents credential interception by cross-origin scripts.
+         ;; Complete the pending WebAuthn call in the page's MAIN world.
          OKP_PASSKEY_RESOLVE_CREATE
          (let [{:keys [request-id credential-json]} message-data]
            (js/window.postMessage
@@ -152,6 +155,7 @@
 
          OKP_PASSKEY_REJECT
          (let [{:keys [request-id error-name error-message]} message-data]
+           (dispatch [:close-passkey-popup request-id])
            (js/window.postMessage
             (clj->js {:type      "OKP_PASSKEY_REJECT"
                       :requestId request-id
@@ -160,43 +164,31 @@
             (.-origin js/location)))
 
          OKP_PASSKEY_BROWSER_DEFAULT
-         (let [{:keys [request-id options-json]} message-data]
-           (js/window.postMessage
-            (clj->js {:type        "OKP_PASSKEY_BROWSER_DEFAULT"
-                      :requestId   request-id
-                      :optionsJson options-json})
-            (.-origin js/location)))
+         (let [request-id (:request-id message-data)]
+           (dispatch [:close-passkey-popup request-id])
+           (js/window.postMessage #js {:type OKP_PASSKEY_BROWSER_DEFAULT :requestId request-id}
+                                  (.-origin js/location)))
 
-         ;; else
-         (okp-println "Content script received unhandled message " message-data))))))
+         (okp-println "Content script received unhandled message" message-data))))))
 
-(defn register-firefox-passkey-relay
-  "Firefox only — adds a window.message listener in the isolated world that
-   picks up OKP_PASSKEY_CREATE / OKP_PASSKEY_GET messages posted by the
-   passkey_intercept MAIN world script and relays them to the background."
-  []
-  (.addEventListener
-   js/window "message"
-   (fn [^js event]
-     (when (and (= (.-source event) js/window)
-                (= (.-origin event) (.-origin js/location)))
-       (let [^js data (.-data event)
-             type     (when data (.-type data))]
-         (cond
-           (= type OKP_PASSKEY_CREATE)
-           (js/chrome.runtime.sendMessage
-            (clj->js {:message-type OKP_PASSKEY_CREATE
-                      :request-id   (.-requestId data)
-                      :options-json (.-optionsJson data)
-                      :origin       (.-origin data)}))
-
-           (= type OKP_PASSKEY_GET)
-           (js/chrome.runtime.sendMessage
-            (clj->js {:message-type OKP_PASSKEY_GET
-                      :request-id   (.-requestId data)
-                      :options-json (.-optionsJson data)
-                      :origin       (.-origin data)}))))))))
-
+(defn register-passkey-relay []
+  (let [origin (.-origin js/location)]
+    (.addEventListener
+     js/window "message"
+     (fn [^js event]
+       (when (and (identical? (.-source event) js/window) (= (.-origin event) origin))
+         (let [^js data (.-data event)
+               type (when data (.-type data))]
+           (when (#{OKP_PASSKEY_CREATE OKP_PASSKEY_GET OKP_PASSKEY_ABORT} type)
+             (-> (js/chrome.runtime.sendMessage
+                  (clj->js {:message-type type
+                            :request-id (.-requestId data)
+                            :options-json (.-optionsJson data)}))
+                 (.catch (fn [_]
+                           (js/window.postMessage
+                            #js {:type OKP_PASSKEY_BROWSER_DEFAULT :requestId (.-requestId data)}
+                            origin)))))))))
+    (js/window.postMessage #js {:type "OKP_PASSKEY_READY"} origin)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;  Messages from content to background script ;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -325,11 +317,12 @@
 ;; Sends a message to the background to get basic entry detail for the selected entry uuid
 (reg-event-fx
  :send-entry-selected
- (fn [{:keys [db]} [_event-id db-key entry-uuid selection-id]]
+ (fn [{:keys [db]} [_event-id db-key entry-uuid selection-id passkey-request-id]]
    {:db (-> db (assoc-in [:entry-selected-done] true))
     :fx [[:common/send-bg-message-regfx {:message-type ENTRY_SELECTED
                                          :db-key db-key
                                          :selection-id selection-id
+                                         :passkey-request-id passkey-request-id
                                          :entry-uuid entry-uuid}]]}))
 
 (reg-event-fx
@@ -342,47 +335,50 @@
 ;; Stores passkey-create-data in app-db and calls the registered SHOW_PASSKEY_CREATE_POPUP handler
 (reg-event-fx
  :received-passkey-create-data
- (fn [{:keys [db]} [_event-id {:keys [message-type passkey-create-data]}]]
-   {:db (-> db (assoc :passkey-create-data passkey-create-data))
+ (fn [{:keys [db]} [_event-id {:keys [message-type passkey-create-data request-id]}]]
+   {:db (-> db (assoc :passkey-create-data (assoc passkey-create-data :request-id request-id)
+                     :passkey-popup-id request-id))
     :fx [[:execute-message-handler-regfx [(get-in db [:message-handlers message-type]) nil]]]}))
 
 (reg-event-fx
+ :close-passkey-popup
+ (fn [{:keys [db]} [_ request-id]]
+   (when (= request-id (:passkey-popup-id db))
+     {:db (dissoc db :passkey-popup-id)
+      :fx [[:execute-message-handler-regfx [(get-in db [:message-handlers CLOSE_PASSKEY_POPUP]) nil]]]})))
+
+(reg-event-fx
  :send-passkey-create-confirmed
- (fn [{:keys [_db]} [_event-id {:keys [db-key group-uuid new-group-name existing-entry-uuid new-entry-name]}]]
-   {:fx [[:common/send-bg-message-regfx {:message-type        PASSKEY_CREATE_CONFIRMED
-                                         :db-key              db-key
-                                         :group-uuid          group-uuid
-                                         :new-group-name      new-group-name
-                                         :existing-entry-uuid existing-entry-uuid
-                                         :new-entry-name      new-entry-name}]]}))
+ (fn [_ [_ selection]]
+   {:fx [[:common/send-bg-message-regfx (assoc selection :message-type PASSKEY_CREATE_CONFIRMED)]]}))
 
 (reg-event-fx
  :send-passkey-create-cancelled
- (fn [{:keys [_db]} [_event-id]]
-   {:fx [[:common/send-bg-message-regfx {:message-type PASSKEY_CREATE_CANCELLED}]]}))
+ (fn [{:keys [db]} [_ request-id]]
+   {:fx [[:common/send-bg-message-regfx {:message-type PASSKEY_CREATE_CANCELLED
+                                         :passkey-request-id (or request-id (:passkey-popup-id db))}]]}))
 
 (reg-event-fx
  :send-passkey-get-cancelled
- (fn [{:keys [_db]} [_event-id]]
-   {:fx [[:common/send-bg-message-regfx {:message-type PASSKEY_GET_CANCELLED}]]}))
+ (fn [{:keys [db]} [_]]
+   {:fx [[:common/send-bg-message-regfx {:message-type PASSKEY_GET_CANCELLED
+                                         :passkey-request-id (:passkey-popup-id db)}]]}))
 
 (reg-event-fx
- :send-passkey-create-fallback
- (fn [{:keys [_db]} [_event-id]]
-   {:fx [[:common/send-bg-message-regfx {:message-type PASSKEY_CREATE_FALLBACK}]]}))
+ :send-passkey-use-browser
+ (fn [_ [_ request-id]]
+   {:fx [[:common/send-bg-message-regfx {:message-type PASSKEY_USE_BROWSER
+                                         :passkey-request-id request-id}]]}))
 
 (reg-event-fx
  :send-passkey-db-chosen
- (fn [{:keys [_db]} [_event-id db-key]]
-   {:fx [[:common/send-bg-message-regfx {:message-type PASSKEY_DB_CHOSEN
-                                         :db-key       db-key}]]}))
+ (fn [_ [_ selection]]
+   {:fx [[:common/send-bg-message-regfx (assoc selection :message-type PASSKEY_DB_CHOSEN)]]}))
 
 (reg-event-fx
  :send-passkey-group-chosen
- (fn [{:keys [_db]} [_event-id group-uuid new-group-name]]
-   {:fx [[:common/send-bg-message-regfx {:message-type   PASSKEY_GROUP_CHOSEN
-                                         :group-uuid     group-uuid
-                                         :new-group-name new-group-name}]]}))
+ (fn [_ [_ selection]]
+   {:fx [[:common/send-bg-message-regfx (assoc selection :message-type PASSKEY_GROUP_CHOSEN)]]}))
 
 ;; Stores passkey groups in app-db and calls the registered SHOW_PASSKEY_GROUPS handler
 (reg-event-fx
@@ -428,6 +424,7 @@
             (assoc-in [:entry-selected-done] false)
             (assoc-in [:matched-entries] matched-entries)
             (assoc :selection-id selection-id)
+            (dissoc :passkey-request-id)
             (assoc-in [:entry-list-fixed-position] fixed-position)
             (assoc-in [:fill-target-origin] fill-target-origin)
             (assoc-in [:top-origin] top-origin)
@@ -442,9 +439,11 @@
 ;; registered SHOW_PASSKEY_LIST handler (create-passkey-list-popup).
 (reg-event-fx
  :passkey-list-loaded
- (fn [{:keys [db]} [_event-id {:keys [message-type matched-entries]}]]
-   {:db (-> db (assoc-in [:matched-entries] matched-entries)
-               (dissoc :selection-id))
+ (fn [{:keys [db]} [_event-id {:keys [message-type matched-entries request-id]}]]
+   {:db (-> db
+            (assoc :matched-entries matched-entries
+                   :passkey-request-id request-id :passkey-popup-id request-id)
+            (dissoc :selection-id :fill-target-origin :top-origin))
     :fx [[:execute-message-handler-regfx [(get-in db [:message-handlers message-type]) nil]]]}))
 
 ;; Entry list mui box is hidden (shadow dom host removed)

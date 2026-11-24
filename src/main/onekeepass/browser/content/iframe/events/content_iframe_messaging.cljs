@@ -14,7 +14,7 @@
                                                          GET_CUSTOM_ICON
                                                          PASSKEY_CREATE_CANCELLED
                                                          PASSKEY_CREATE_CONFIRMED
-                                                         PASSKEY_CREATE_FALLBACK
+                                                         PASSKEY_USE_BROWSER
                                                          PASSKEY_CREATE_SUCCESS
                                                          PASSKEY_DB_CHOSEN
                                                          PASSKEY_GROUP_CHOSEN
@@ -95,33 +95,31 @@
       
       ENTRY_SELECTED
       (dispatch [:send-entry-selected (:db-key message-data) (:entry-uuid message-data)
-                 (:selection-id message-data)])
+                 (:selection-id message-data) (:passkey-request-id message-data)])
 
       GET_CUSTOM_ICON
       (dispatch [:send-get-custom-icon (:db-key message-data) (:custom-icon-uuid message-data)])
 
       ;; Step 1: user picked a DB — relay to background to fetch groups
       PASSKEY_DB_CHOSEN
-      (dispatch [:send-passkey-db-chosen (:db-key message-data)])
+      (dispatch [:send-passkey-db-chosen (select-keys message-data [:db-key :passkey-request-id])])
 
       ;; Step 2: user picked/named a group — relay to background to fetch entries
       PASSKEY_GROUP_CHOSEN
-      (dispatch [:send-passkey-group-chosen (:group-uuid message-data) (:new-group-name message-data)])
+      (dispatch [:send-passkey-group-chosen (select-keys message-data [:group-uuid :new-group-name :passkey-request-id])])
 
       ;; Step 3: user confirmed — relay full create params to background
       PASSKEY_CREATE_CONFIRMED
       (dispatch [:send-passkey-create-confirmed (select-keys message-data [:db-key :group-uuid :new-group-name
-                                                                           :existing-entry-uuid :new-entry-name])])
+                                                                           :existing-entry-uuid :new-entry-name :passkey-request-id])])
 
       PASSKEY_CREATE_CANCELLED
       (do
         (dispatch [:execute-iframe-message-type {:message-type CLOSE_PASSKEY_CREATE_POPUP}])
-        (dispatch [:send-passkey-create-cancelled]))
+        (dispatch [:send-passkey-create-cancelled (:passkey-request-id message-data)]))
 
-      PASSKEY_CREATE_FALLBACK
-      (do
-        (dispatch [:execute-iframe-message-type {:message-type CLOSE_PASSKEY_CREATE_POPUP}])
-        (dispatch [:send-passkey-create-fallback]))
+      PASSKEY_USE_BROWSER
+      (dispatch [:send-passkey-use-browser (:passkey-request-id message-data)])
 
       ;; Main popup requests settings popup to open
       SHOW_SETTINGS_POPUP
@@ -214,7 +212,7 @@
 (reg-event-fx
  :content-iframe/matched-entries-loaded
  (fn [{:keys [db]} [_event-id]]
-   (let [message-data (select-keys db [:matched-entries :fill-target-origin :top-origin :selection-id])
+   (let [message-data (select-keys db [:matched-entries :fill-target-origin :top-origin :selection-id :passkey-request-id])
          message-data (merge {:message-type SHOW_ENTRY_LIST} message-data)]
      #_(u/okp-println "Sending entries data of SHOW_ENTRY_LIST" message-data "to iframe")
      {:fx [[:common/send-iframe-message-regfx message-data]]})))

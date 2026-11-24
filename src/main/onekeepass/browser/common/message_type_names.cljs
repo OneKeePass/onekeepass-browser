@@ -49,8 +49,9 @@
 (def RESIZE_IFRAME_PASSKEY_CREATE "RESIZE_IFRAME_PASSKEY_CREATE")
 (def PASSKEY_CREATE_CONFIRMED "PASSKEY_CREATE_CONFIRMED")
 (def PASSKEY_CREATE_CANCELLED "PASSKEY_CREATE_CANCELLED")
-(def PASSKEY_CREATE_FALLBACK  "PASSKEY_CREATE_FALLBACK")
-(def PASSKEY_GET_CANCELLED    "PASSKEY_GET_CANCELLED")    ;; content→bg: user dismissed passkey-list popup via × button  ;; iframe→content→bg: detach proxy + reject, fall back to browser default
+(def PASSKEY_USE_BROWSER "PASSKEY_USE_BROWSER")
+(def CLOSE_PASSKEY_POPUP "CLOSE_PASSKEY_POPUP")
+(def PASSKEY_GET_CANCELLED    "PASSKEY_GET_CANCELLED")
 
 ;; Passkey creation multi-step flow — DB → Group → Entry
 (def PASSKEY_DB_CHOSEN      "PASSKEY_DB_CHOSEN")      ;; iframe→content→bg: DB selected, fetch groups
@@ -59,10 +60,11 @@
 (def SHOW_PASSKEY_ENTRIES   "SHOW_PASSKEY_ENTRIES")   ;; bg→content→iframe: entry list for chosen group
 (def PASSKEY_CREATE_SUCCESS "PASSKEY_CREATE_SUCCESS") ;; bg→content→iframe: passkey saved successfully
 
-;; Firefox passkey relay — MAIN world <-> isolated world <-> background
+;; Passkey relay — MAIN world <-> isolated world <-> background
 ;; MAIN world → isolated world → background (via window.postMessage then chrome.runtime.sendMessage)
 (def OKP_PASSKEY_CREATE "OKP_PASSKEY_CREATE")
 (def OKP_PASSKEY_GET "OKP_PASSKEY_GET")
+(def OKP_PASSKEY_ABORT "OKP_PASSKEY_ABORT")
 ;; background → isolated world → MAIN world (via tabs.sendMessage then window.postMessage)
 (def OKP_PASSKEY_RESOLVE_CREATE "OKP_PASSKEY_RESOLVE_CREATE")
 (def OKP_PASSKEY_RESOLVE_GET "OKP_PASSKEY_RESOLVE_GET")

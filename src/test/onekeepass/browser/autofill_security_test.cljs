@@ -175,5 +175,7 @@
     (is (= :load-selected-entry-detail (ffirst dispatched))))
   (let [{:keys [dispatched]}
         (capture-dispatches {:pending-webauthn {:type :get :tab-id 4}}
-                            [:route-entry-selected sender (dissoc selected-entry :selection-id)])]
+                            [:route-entry-selected sender (-> selected-entry
+                                                             (dissoc :selection-id)
+                                                             (assoc :passkey-request-id "passkey"))])]
     (is (= :passkey/entry-selected (ffirst dispatched)))))

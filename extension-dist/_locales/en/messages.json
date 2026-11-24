@@ -42,7 +42,9 @@
     "appIsNotRunning": {
         "message" : "There is no connection to the locally installed app. The app may not be running. Please start the app and then reconnect",
         "description": "The main app should be running for the browser extension to work"
+    },
+    "useBrowserPasskey": {
+        "message": "Use browser passkey",
+        "description": "Continue the WebAuthn request in the browser to use a security key, phone or another provider."
     }
-
-    
 }

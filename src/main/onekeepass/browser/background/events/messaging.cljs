@@ -33,11 +33,12 @@
                                                          GET_CUSTOM_ICON
                                                          GET_ENTRY_LIST
                                                          LAUNCHING_POPUP
+                                                         OKP_PASSKEY_ABORT
                                                          OKP_PASSKEY_CREATE
                                                          OKP_PASSKEY_GET
                                                          PASSKEY_CREATE_CANCELLED
                                                          PASSKEY_CREATE_CONFIRMED
-                                                         PASSKEY_CREATE_FALLBACK
+                                                         PASSKEY_USE_BROWSER
                                                          PASSKEY_GET_CANCELLED
                                                          PASSKEY_DB_CHOSEN
                                                          PASSKEY_GROUP_CHOSEN
@@ -136,7 +137,8 @@
                 (assoc :association-id nil)
                 (assoc-in [:app-connection :state] APP_DISCONNECTED))
         :fx [[:reset-recv-seq-regfx nil]
-             [:connection-badge-regfx false]]}))))
+             [:connection-badge-regfx false]
+             [:dispatch [:passkey/desktop-failed]]]}))))
 
 (reg-event-fx
  :native-app-not-available
@@ -146,7 +148,8 @@
             (assoc :app-port nil)
             (assoc :association-id nil)
             (assoc-in [:app-connection :state] NATIVE_APP_NOT_AVAILABLE))
-    :fx [[:connection-badge-regfx false]]}))
+    :fx [[:connection-badge-regfx false]
+         [:dispatch [:passkey/desktop-failed]]]}))
 
 ;; Reflects the native app connection state on the extension toolbar icon. When the app
 ;; is not connected we show a small badge and a tooltip so the disconnected state is
@@ -289,13 +292,10 @@
 ;; normal password-fill flow, depending on whether a passkey get request is pending.
 (reg-event-fx
  :route-entry-selected
- (fn [{:keys [db]} [_event-id sender-info entry-info]]
-   (let [pending (get db :pending-webauthn)]
-     (if (and pending (= (:type pending) :get)
-              (nil? (:selection-id entry-info))
-              (= (:tab-id sender-info) (:tab-id pending)))
-       {:fx [[:dispatch [:passkey/entry-selected entry-info]]]}
-       {:fx [[:dispatch [:load-selected-entry-detail sender-info entry-info]]]}))))
+ (fn [_ [_event-id sender-info entry-info]]
+   (if (:passkey-request-id entry-info)
+     {:fx [[:dispatch [:passkey/entry-selected sender-info entry-info]]]}
+     {:fx [[:dispatch [:load-selected-entry-detail sender-info entry-info]]]})))
 
 ;; Sends a request to the proxy app through the app-port by native messaging
 (reg-event-fx
@@ -401,6 +401,11 @@
  (fn [{:keys [db]} [_event-id {:keys [action error-message] :as error-resp}]]
    (u/okp-println "Received error response" error-resp)
    (cond
+     (and (:request-id error-resp)
+          (#{"GetOpenedDatabasesForPasskey" "GetDbGroupsForPasskey" "GetDbGroupEntriesForPasskey"
+             "CreatePasskey" "GetPasskeyList" "CompletePasskeyAssertion"} action))
+     {:fx [[:dispatch [:passkey/desktop-failed (:request-id error-resp)]]]}
+
      (= action PROXY_APP_CONNECTION)
      (let [show-error? (get-in db [:app-connection :show-error-on-next-proxy-failure])]
        (cond-> {:db (-> db
@@ -626,14 +631,15 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;   extension side message handling with re-frame ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defn select-sender-keys [sender]
-  (let [{:keys [url frameId documentId tab]} (j/lookup sender)
+  (let [{:keys [url origin frameId documentId tab]} (j/lookup sender)
         tab-id (j/get tab :id)
         tab-url (j/get tab :url)]
     {:tab-id tab-id
      :tab-url tab-url
      :frame-id frameId
      :document-id documentId
-     :frame-url url}))
+     :frame-url url
+     :frame-origin origin}))
 
 (defn- received-content-loading [sender send-response]
   (let [{:keys [url frameId tab]} (j/lookup sender)
@@ -690,6 +696,12 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;  Messages from content script ;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(defn- receive-passkey-request [type sender-info message-data send-response]
+  (dispatch [:passkey/request
+             (merge sender-info (select-keys message-data [:request-id :options-json]) {:type type})])
+  (send-response #js {:accepted true})
+  false)
+
 (defn register-extension-message-handler
   "Called onetime whenever background script is initialized to add listeners to receive messages from 
    content scripts or from popup scripts"
@@ -704,8 +716,13 @@
        #_(u/okp-println "Selected sender info in bg message listener" sender-info)
        #_(u/okp-println "Received runtime message" message-data ",from tab-id" (:tab-id sender-info) ",frame-id" (:frame-id sender-info) (type message))
 
-       ;; Listens to various message types from content script
        (condp = message-type
+
+         OKP_PASSKEY_CREATE
+         (receive-passkey-request :create sender-info message-data send-response)
+
+         OKP_PASSKEY_GET
+         (receive-passkey-request :get sender-info message-data send-response)
 
          START_ASSOCIATION
          (dispatch [:send-assoc-message])
@@ -732,67 +749,37 @@
          (app-reconnect sender-info)
 
          ;; Background gets this message from content script to get the basic entry info from the main app.
-         ;; Route to passkey flow if a passkey assertion is pending; otherwise normal password flow.
+         ;; Passkey selections carry their own request ID.
          ENTRY_SELECTED
-         (dispatch [:route-entry-selected sender-info (select-keys message-data [:db-key :entry-uuid :selection-id])])
+         (dispatch [:route-entry-selected sender-info (select-keys message-data [:db-key :entry-uuid :selection-id :passkey-request-id])])
 
          REDETECT_FIELDS
          (dispatch [:common/send-message-to-current-tab
                     {:message-type REDETECT_FIELDS}])
 
-         ;; Firefox passkey relay — content script forwards these from the MAIN world
-         OKP_PASSKEY_CREATE
-         (let [rp-name (let [opts (js->clj (.parse js/JSON (:options-json message-data)) :keywordize-keys true)]
-                         (or (get-in opts [:rp :name])
-                             (get-in opts [:rp :id])
-                             "Passkey"))]
-           (dispatch [:passkey/create-request
-                      {:chrome-request-id (:request-id message-data)
-                       :options-json      (:options-json message-data)
-                       :rp-name           rp-name
-                       :origin            (or (:origin message-data) "")
-                       :tab-url           (or (:tab-url sender-info) "")
-                       :tab-id            (:tab-id sender-info)
-                       :platform          :firefox}]))
+         OKP_PASSKEY_ABORT
+         (do
+           (dispatch [:passkey/cancel sender-info {:passkey-request-id (:request-id message-data)}])
+           (send-response #js {:accepted true})
+           false)
 
-         OKP_PASSKEY_GET
-         (dispatch [:passkey/get-request
-                    {:chrome-request-id (:request-id message-data)
-                     :options-json      (:options-json message-data)
-                     :origin            (or (:origin message-data) "")
-                     :tab-url           (or (:tab-url sender-info) "")
-                     :tab-id            (:tab-id sender-info)
-                     :platform          :firefox}])
-
-         ;; User picked a database in step 1 — fetch that DB's groups
          PASSKEY_DB_CHOSEN
-         (dispatch [:passkey/db-chosen {:db-key (:db-key message-data)}])
+         (dispatch [:passkey/db-chosen sender-info message-data])
 
-         ;; User picked (or named) a group in step 2 — fetch entries or emit empty list
          PASSKEY_GROUP_CHOSEN
-         (dispatch [:passkey/group-chosen {:group-uuid     (:group-uuid message-data)
-                                           :new-group-name (:new-group-name message-data)}])
+         (dispatch [:passkey/group-chosen sender-info message-data])
 
-         ;; User confirmed in step 3 — forward all params to create the passkey
          PASSKEY_CREATE_CONFIRMED
-         (dispatch [:passkey/db-selected-for-create
-                    {:db-key              (:db-key message-data)
-                     :group-uuid          (:group-uuid message-data)
-                     :new-group-name      (:new-group-name message-data)
-                     :existing-entry-uuid (:existing-entry-uuid message-data)
-                     :new-entry-name      (:new-entry-name message-data)}])
+         (dispatch [:passkey/db-selected-for-create sender-info message-data])
 
-         ;; User cancelled the passkey creation popup — reject the pending request
          PASSKEY_CREATE_CANCELLED
-         (dispatch [:passkey/create-cancelled])
+         (dispatch [:passkey/cancel sender-info message-data])
 
-         ;; User dismissed the passkey list popup via × — reject the pending GET request
          PASSKEY_GET_CANCELLED
-         (dispatch [:passkey/get-cancelled])
+         (dispatch [:passkey/cancel sender-info message-data])
 
-         ;; User chose "Use Browser Default" — detach proxy then reject
-         PASSKEY_CREATE_FALLBACK
-         (dispatch [:passkey/create-fallback])
+         PASSKEY_USE_BROWSER
+         (dispatch [:passkey/use-browser sender-info message-data])
 
          ;; Main popup iframe asks to add/remove the current site in the
          ;; disabled-sites list. The iframe is embedded in the page, so the

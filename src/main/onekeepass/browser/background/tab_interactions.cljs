@@ -24,13 +24,16 @@
    (fn [details]
      (let [{:keys [tabId frameId url]} (j/lookup details)]
        #_(println "webNavigation COMMITTED tabId frameId url " tabId frameId url)
-       (rf/dispatch [:content/web-navigation-committed tabId frameId url])))))
+       (rf/dispatch [:content/web-navigation-committed tabId frameId url])
+       (when (zero? frameId)
+         (rf/dispatch [:passkey/tab-left tabId]))))))
 
 (defn add-tab-onremoved-listener []
   (js/chrome.tabs.onRemoved.addListener
    ;; remove-info obj props are windowId,isWindowClosing
    (fn [tab-id _remove-info]
-     (rf/dispatch [:content/tab-removed tab-id]))))
+     (rf/dispatch [:content/tab-removed tab-id])
+     (rf/dispatch [:passkey/tab-left tab-id]))))
 
 (defn add-popup-action-listener
   "Popup action listener when the extension icon is clicked in the toolbar"
