@@ -7,6 +7,8 @@
    Step 4 (:saving)     — spinner while backend saves
    Step 5 (:success)    — 'Passkey saved!' then auto-close after 1.5 s"
   (:require
+   [applied-science.js-interop :as j]
+   [onekeepass.browser.common.utils :as u]
    [onekeepass.browser.common.message-type-names :refer [RESIZE_IFRAME_PASSKEY_CREATE]]
    [onekeepass.browser.common.mui-components
     :refer [mui-box mui-button mui-divider mui-list mui-list-item-button
@@ -200,10 +202,7 @@
      "Go Back"]
     [mui-button {:variant "contained" :size "small" :color "error"
                  :on-click #(iframe-content-messaging/send-passkey-create-cancelled)}
-     "Cancel"]
-    #_[mui-button {:variant "outlined" :size "small" :color "warning"
-                 :on-click #(iframe-content-messaging/send-passkey-create-fallback)}
-     "Use Browser Default"]]])
+     "Cancel"]]])
 
 ;; ── Step 5: Saving ────────────────────────────────────────────────────────────
 
@@ -221,7 +220,7 @@
 ;; ── main content ──────────────────────────────────────────────────────────────
 
 (defn- main-content []
-  (let [{:keys [databases rp-name]} @(iframe-content-messaging/passkey-create-data)
+  (let [{:keys [databases rp-name request-id]} @(iframe-content-messaging/passkey-create-data)
         groups   @(iframe-content-messaging/passkey-groups)
         entries  @(iframe-content-messaging/passkey-entries)
         success? @(iframe-content-messaging/passkey-create-success?)]
@@ -248,7 +247,13 @@
        :entry-pick     [step-entry-pick entries rp-name]
        :confirm-cancel [step-confirm-cancel]
        :saving         [step-saving]
-       :success        [step-success])]))
+       :success        [step-success])
+     (when (and request-id (not (#{:saving :success} @current-step)))
+       [mui-button {:on-click (fn [event]
+                                (when (j/get-in event [:nativeEvent :isTrusted])
+                                  (iframe-content-messaging/use-browser-passkey request-id)))}
+        (u/lstr "useBrowserPasskey")])]))
+
 
 ;; ── auto-resize ───────────────────────────────────────────────────────────────
 

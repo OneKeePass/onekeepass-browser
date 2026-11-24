@@ -84,17 +84,19 @@ When a website asks you to create a passkey, OneKeePass intercepts the request a
 3. **Choose entry** -- pick an existing entry or create a new one to store the passkey
 4. Click **Save Passkey** to complete
 
-You will see a *"Passkey saved!"* confirmation. You can cancel at any step.
+You will see a *"Passkey saved!"* confirmation. Choose **Use browser passkey** to create the passkey with your browser, phone, or security key instead.
 
 ### Signing In with a Passkey
 
-When a website requests passkey authentication:
+When a website opens a passkey sign-in dialog:
 
 1. OneKeePass shows a popup listing matching passkeys from your open database(s)
 2. Select the passkey you want to use
 3. The extension handles the rest of the authentication automatically
 
-If no matching passkeys are found, a message will inform you that no saved passkeys were found for the site.
+If OneKeePass finds no matching passkeys, the request continues in the browser automatically. If the extension lists matching passkeys, choose **Use browser passkey** to open the browser’s passkey dialog. That dialog can offer a USB security key such as a YubiKey or a QR code for a nearby phone, depending on your browser and device.
+
+Browser passkey autofill (conditional mediation) and passkey requests from embedded frames are handled directly by the browser.
 
 ## Disabling OneKeePass on Specific Sites
 

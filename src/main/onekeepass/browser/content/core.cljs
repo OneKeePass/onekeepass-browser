@@ -1,6 +1,7 @@
 (ns onekeepass.browser.content.core
   (:require
    [onekeepass.browser.common.message-type-names :refer [BACKGROUND_ERROR
+                                                         CLOSE_PASSKEY_POPUP
                                                          NO_BROWSER_ENABLED_DB
                                                          NO_MATCHING_ENTRIES
                                                          NO_MATCHING_PASSKEYS
@@ -11,7 +12,7 @@
                                                          SHOW_PASSKEY_CREATE_POPUP
                                                          SHOW_PASSKEY_GROUPS
                                                          SHOW_PASSKEY_LIST]]
-   [onekeepass.browser.common.utils :as u :refer [is-firefox-browser?]]
+   [onekeepass.browser.common.utils :as u]
    [onekeepass.browser.content.events.messaging :as messaging-event]
    [onekeepass.browser.content.events.popup] ;;[onekeepass.browser.content.form-fields-2 :as form-fields]
    [onekeepass.browser.content.form-fields :as form-fields]
@@ -103,12 +104,11 @@
     ;;   POPUP_ACTION the user could never re-enable the site from the page
     ;; - the passkey popups stay live because per-site disable covers login-form
     ;;   detection only; passkeys are governed solely by the global
-    ;;   passkeys-enabled setting (and on Firefox skipping them would hang
-    ;;   navigator.credentials calls - the MAIN world intercept has no
-    ;;   fallback timeout)
+    ;;   passkeys-enabled setting
     (messaging-event/register-message-handlers
      {POPUP_ACTION popup-host/create-main-popup
 
+      CLOSE_PASSKEY_POPUP popup-host/close-passkey-popup
       SHOW_PASSKEY_LIST popup-host/create-passkey-list-popup
       SHOW_PASSKEY_CREATE_POPUP popup-host/create-passkey-create-popup
 
@@ -123,9 +123,11 @@
       ;; IFRAME_POPUP_ACTION_INITIATE popup-host/create-main-popup
       })
 
-    ;; Firefox only: relay OKP_PASSKEY_CREATE/GET window messages to the background
-    (when (is-firefox-browser?)
-      (messaging-event/register-firefox-passkey-relay))
+    (when (and (identical? js/window (.-top js/window))
+               (.-isSecureContext js/window)
+               (or (= "https:" (.-protocol js/location))
+                   (= "localhost" (.-hostname js/location))))
+      (messaging-event/register-passkey-relay))
 
     ;; Notify the background which uses this to record the frame-id of the content script
     ;; The response tells whether the user has disabled this site (checked by the

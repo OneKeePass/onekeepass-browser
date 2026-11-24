@@ -14,7 +14,7 @@
                                                          MSG_BOX_MESSAGE
                                                          PASSKEY_CREATE_CANCELLED
                                                          PASSKEY_CREATE_CONFIRMED
-                                                         PASSKEY_CREATE_FALLBACK
+                                                         PASSKEY_USE_BROWSER
                                                          PASSKEY_CREATE_SUCCESS
                                                          PASSKEY_DB_CHOSEN
                                                          PASSKEY_GROUP_CHOSEN
@@ -100,7 +100,8 @@
   (iframe-content-conn/send-message-to-content {:message-type ENTRY_SELECTED
                                                 :db-key db-key
                                                 :entry-uuid entry-uuid
-                                                :selection-id @(subscribe [:iframe-selection-id])}))
+                                                :selection-id @(subscribe [:iframe-selection-id])
+                                                :passkey-request-id @(subscribe [:iframe-passkey-request-id])}))
 
 (defn send-get-custom-icon [db-key custom-icon-uuid]
   (u/okp-println "Sending from content to iframe GET_CUSTOM_ICON message")
@@ -108,26 +109,19 @@
                                                 :db-key db-key
                                                 :custom-icon-uuid custom-icon-uuid}))
 
-(defn send-passkey-create-confirmed
-  "Called from passkey creation popup iframe when user clicks 'Save Passkey'.
-   Sends all create params to the content script, which forwards them to the background."
-  [{:keys [db-key group-uuid new-group-name existing-entry-uuid new-entry-name]}]
-  (iframe-content-conn/send-message-to-content {:message-type        PASSKEY_CREATE_CONFIRMED
-                                                :db-key              db-key
-                                                :group-uuid          group-uuid
-                                                :new-group-name      new-group-name
-                                                :existing-entry-uuid existing-entry-uuid
-                                                :new-entry-name      new-entry-name}))
+(defn- send-passkey-create-action [message]
+  (iframe-content-conn/send-message-to-content
+   (assoc message :passkey-request-id (:request-id @(subscribe [:iframe-passkey-create-data])))))
 
-(defn send-passkey-create-cancelled
-  "Called from passkey creation popup iframe when user clicks 'Cancel' or auto-closes."
-  []
-  (iframe-content-conn/send-message-to-content {:message-type PASSKEY_CREATE_CANCELLED}))
+(defn send-passkey-create-confirmed [selection]
+  (send-passkey-create-action (assoc selection :message-type PASSKEY_CREATE_CONFIRMED)))
 
-(defn send-passkey-create-fallback
-  "Called when user chooses 'Use Browser Default' — detaches OKP proxy and rejects current request."
-  []
-  (iframe-content-conn/send-message-to-content {:message-type PASSKEY_CREATE_FALLBACK}))
+(defn send-passkey-create-cancelled []
+  (send-passkey-create-action {:message-type PASSKEY_CREATE_CANCELLED}))
+
+(defn use-browser-passkey [request-id]
+  (iframe-content-conn/send-message-to-content {:message-type PASSKEY_USE_BROWSER
+                                                :passkey-request-id request-id}))
 
 (defn close-settings-popup
   "Called from the settings popup iframe to close itself."
@@ -142,14 +136,14 @@
 (defn send-passkey-db-chosen
   "Called when user picks a database in step 1."
   [db-key]
-  (iframe-content-conn/send-message-to-content {:message-type PASSKEY_DB_CHOSEN
+  (send-passkey-create-action {:message-type PASSKEY_DB_CHOSEN
                                                 :db-key       db-key}))
 
 (defn send-passkey-group-chosen
   "Called when user picks (or names) a group in step 2.
    group-uuid is nil when creating a new group."
   [group-uuid new-group-name]
-  (iframe-content-conn/send-message-to-content {:message-type   PASSKEY_GROUP_CHOSEN
+  (send-passkey-create-action {:message-type   PASSKEY_GROUP_CHOSEN
                                                 :group-uuid     group-uuid
                                                 :new-group-name new-group-name}))
 
@@ -250,12 +244,18 @@
 
 (reg-event-fx
  :iframe-matched-entries-loaded
- (fn [{:keys [db]} [_event_id {:keys [matched-entries fill-target-origin top-origin selection-id]}]]
+ (fn [{:keys [db]} [_event_id {:keys [matched-entries fill-target-origin top-origin selection-id passkey-request-id]}]]
    {:db (-> db
             (assoc-in [:iframe :matched-entries] matched-entries)
             (assoc-in [:iframe :selection-id] selection-id)
+            (assoc-in [:iframe :passkey-request-id] passkey-request-id)
             (assoc-in [:iframe :fill-target-origin] fill-target-origin)
             (assoc-in [:iframe :top-origin] top-origin))}))
+
+(reg-sub
+ :iframe-passkey-request-id
+ (fn [db _]
+   (get-in db [:iframe :passkey-request-id])))
 
 (reg-sub
  :iframe-selection-id

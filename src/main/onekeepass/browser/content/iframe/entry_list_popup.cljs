@@ -5,13 +5,14 @@
    [onekeepass.browser.common.message-type-names :refer [RESIZE_IFRAME_ENTRY_LIST]]
    [onekeepass.browser.common.mui-components
     :as m
-    :refer [mui-avatar mui-box mui-list mui-list-item mui-list-item-avatar
+    :refer [mui-avatar mui-box mui-button mui-list mui-list-item mui-list-item-avatar
             mui-list-item-text mui-list-subheader mui-stack mui-typography]]
    [onekeepass.browser.common.utils :as u]
    [onekeepass.browser.content.iframe.events.iframe-content-messaging :as iframe-content-messaging]
    [onekeepass.browser.content.inject.db-icons :as db-icons :refer [entry-icon]]
    [reagent.core :as r]
-   [reagent.dom :as rd]))
+   [reagent.dom :as rd]
+   [re-frame.core :refer [subscribe]]))
 
 (defn- delayed-close-popup []
   (js/window.setTimeout
@@ -122,7 +123,13 @@
               [fill-target-header]
               [mui-stack {:sx {}}
                [mui-stack {:sx {:width "100%"}}
-                [dbs-entry-list-content]]]]]))
+                [dbs-entry-list-content]]
+               (when-let [request-id @(subscribe [:iframe-passkey-request-id])]
+                 [mui-button {:on-click (fn [event]
+                                         (when (trusted-event? event)
+                                           (iframe-content-messaging/use-browser-passkey request-id)))}
+                  (u/lstr "useBrowserPasskey")])]]]))
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 

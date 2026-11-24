@@ -77,6 +77,10 @@
 (defn- close-passkey-create-popup []
   (remove-host-element-by-id (form-element-id OKP_PASSKEY_CREATE_TAG_NAME)))
 
+(defn close-passkey-popup []
+  (close-passkey-list-popup)
+  (close-passkey-create-popup))
+
 (defn- cancel-passkey-create-popup
   "Called when the user explicitly closes the passkey create popup via the × button.
    Rejects the pending WebAuthn CREATE request before removing the popup."
