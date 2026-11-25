@@ -4,6 +4,7 @@
    [onekeepass.browser.background.events.common :as cmn-event]
    [onekeepass.browser.common.frame-security :as frame-security]
    [onekeepass.browser.common.message-type-names :refer [CONTENT_FRAME_ID
+                                                         LIST_KIND_PASSWORD
                                                          NO_BROWSER_ENABLED_DB
                                                          NO_MATCHING_ENTRIES
                                                          SELECTED_ENTRY_DETAIL
@@ -87,6 +88,7 @@
        {:db (assoc-in db [:tabs (:tab-id req) :autofill-selection] selection)
         :fx [[:dispatch [:common/send-tab-message-for-request-id
                          {:message-type SHOW_ENTRY_LIST
+                          :list-kind LIST_KIND_PASSWORD
                           :matched-entries matched-entries
                           :selection-id request-id
                           :fixed-position in-sub-frame?

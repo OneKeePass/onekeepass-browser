@@ -17,6 +17,15 @@
  (fn [db [_event-id sites]]
    (assoc-in db [:settings :disabled-sites] sites)))
 
+;; Called from the storage onChanged listener: whether to offer saving logins and
+;; the hosts the user chose 'Never for this site' on
+(reg-event-db
+ :settings/save-logins-changed
+ (fn [db [_event-id {:keys [save-logins-enabled never-save-sites]}]]
+   (-> db
+       (assoc-in [:settings :save-logins-enabled] save-logins-enabled)
+       (assoc-in [:settings :never-save-sites] never-save-sites))))
+
 ;; Called when TOGGLE_SITE_DISABLED is received from the main popup iframe
 ;; arg-m keys: host include-subdomains disable? tab-id
 (reg-event-fx

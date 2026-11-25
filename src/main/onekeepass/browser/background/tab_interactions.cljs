@@ -1,6 +1,7 @@
 (ns onekeepass.browser.background.tab-interactions
   (:require
    [applied-science.js-interop :as j]
+   [onekeepass.browser.background.events.credential-save :as credential-save]
    [onekeepass.browser.background.events.popup :as popup-event]
    #_[onekeepass.browser.background.iframe.events.popup :as iframe-popup-event]
    [re-frame.core :as rf]
@@ -30,7 +31,19 @@
   (js/chrome.tabs.onRemoved.addListener
    ;; remove-info obj props are windowId,isWindowClosing
    (fn [tab-id _remove-info]
+     ;; Drops any login captured in the tab and not yet saved
+     (credential-save/on-tab-removed tab-id)
      (rf/dispatch [:content/tab-removed tab-id]))))
+
+(defn add-web-navigation-completed-listener
+  "A page finished loading in a tab's top frame. Used by the save-login flow to
+   tell that a submitted login moved on to a new page"
+  []
+  (js/chrome.webNavigation.onCompleted.addListener
+   (fn [details]
+     (let [{:keys [tabId frameId]} (j/lookup details)]
+       (when (= 0 frameId)
+         (credential-save/on-tab-navigation-completed tabId))))))
 
 (defn add-popup-action-listener
   "Popup action listener when the extension icon is clicked in the toolbar"
@@ -57,7 +70,7 @@
   (add-tab-onremoved-listener)
   #_(add-tab-updated-listener)
   (add-web-navigation-committed-listener)
-  #_(add-web-navigation-completed-listener))
+  (add-web-navigation-completed-listener))
 
 
 ;; Does not do anything at the moment
@@ -71,8 +84,3 @@
 
        #_(println "tabs.onUpdated tab-id " tab-id  " url " (j/get change-info :url)  " tab status "  (j/get change-info :status)))))
 
-#_(defn add-web-navigation-completed-listener []
-  (js/chrome.webNavigation.onCompleted.addListener
-   (fn [details]
-     (let [{:keys [tabId url frameId]} (j/lookup details)]
-       #_(println "webNavigation COMPLETED tabId frameId url " tabId frameId url)))))

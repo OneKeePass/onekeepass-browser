@@ -62,6 +62,37 @@ To pick the credentials for a site, please add the URL to the **URL or Additiona
 
 ![Quick "Disable on this site" control in the extension popup](images/add-url-msg.png)
 
+## Saving New and Changed Logins
+
+When you sign in, sign up or change a password on a site, the extension can offer to save it in your database. Nothing is saved until you confirm.
+
+### How It Works
+
+1. Submit the site's login, sign-up or change-password form as usual
+2. Once the login has gone through (the next page loads, or the form goes away), a **Save this login?** or **Update saved password?** popup appears at the top right
+   - The extension does not offer anything after a failed login (for example a mistyped password), or when the login you used is already saved
+3. Choose what to do:
+   - **Save**: adds a new entry. You can change its title and pick the database and group
+   - **Update**: writes the new password to the existing entry for that username. The old password is kept in the entry's history
+   - **Save as new**: adds a separate entry instead of updating
+   - **Not now**: closes the popup; nothing is saved
+   - **Never for this site**: closes the popup and stops offering on this site
+
+### What Is Never Saved
+
+- Logins on plain `http://` sites (except `localhost`)
+- Logins typed into a login frame from another site embedded in the page
+- Logins in private (incognito) windows
+- Logins on sites where OneKeePass is disabled
+
+Your stored passwords never leave the desktop app: it compares the submitted login with your entries itself and only tells the extension whether it is new, changed or already saved.
+
+### Turning It Off
+
+Open **Settings** from the extension popup and clear **Offer to save new and changed logins**. The sites where you chose **Never for this site** are listed there, and can be removed from the list.
+
+> Saving logins needs a OneKeePass desktop app version that supports it.
+
 ## Using Passkeys (WebAuthn/FIDO2)
 
 Passkeys are a modern passwordless sign-in method. OneKeePass can store and use passkeys directly from your KeePass database, acting as a passkey provider.

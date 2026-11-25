@@ -89,11 +89,13 @@
         "js/message-popup.js",
         "js/passkey-create-popup.js",
         "js/settings-popup.js",
+        "js/save-login-popup.js",
         "entry_list_popup.html",
         "main_popup.html",
         "msg_popup.html",
         "passkey_create_popup.html",
-        "settings_popup.html"
+        "settings_popup.html",
+        "save_login_popup.html"
       ]
     }
   ],

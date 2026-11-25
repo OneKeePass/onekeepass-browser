@@ -51,6 +51,10 @@
 
     :settings-popup
     {:init-fn onekeepass.browser.content.iframe.settings-popup/init
+     :depends-on #{:shared}}
+
+    :save-login-popup
+    {:init-fn onekeepass.browser.content.iframe.save-login-popup/init
      :depends-on #{:shared}}}
 
    ;; Here is some production config

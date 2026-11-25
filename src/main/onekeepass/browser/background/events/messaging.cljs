@@ -4,7 +4,9 @@
    [clojure.string :as str]
    [onekeepass.browser.common.frame-security :as frame-security]
    [onekeepass.browser.background.crypto :as cryto]
+   [onekeepass.browser.background.events.credential-save :as credential-save]
    [onekeepass.browser.background.events.common :as bg-cmn-event :refer [ASSOCIATE
+                                                                         CHECK_LOGIN_CREDENTIAL
                                                                          DB_GROUP_ENTRIES_FOR_PASSKEY
                                                                          DB_GROUPS_FOR_PASSKEY
                                                                          DISCONNECT
@@ -12,6 +14,8 @@
                                                                          CUSTOM_ICON
                                                                          GET_CUSTOM_ICON_ACTION
                                                                          INIT_SESSION_KEY
+                                                                         LOGIN_CREDENTIAL_CHECKED
+                                                                         LOGIN_CREDENTIAL_SAVED
                                                                          NATIVE_APP_ID
                                                                          NATIVE_APP_ID_DEV
                                                                          OPENED_DATABASES_FOR_PASSKEY
@@ -20,6 +24,7 @@
                                                                          PASSKEY_LIST
                                                                          PROXY_APP_CONNECTION
                                                                          PROXY_ERROR
+                                                                         SAVE_LOGIN_CREDENTIAL
                                                                          SELECTED_ENTRY]]
    [onekeepass.browser.common.connection-states :refer [APP_CONNECTED
                                                         APP_DISCONNECTED
@@ -28,11 +33,16 @@
                                                         PROXY_TO_APP_NOT_CONNECTED]]
    [onekeepass.browser.common.message-type-names :refer [CONTENT_LOGIN_FIELDS_IDENTIFIED
                                                          CONTENT_SCRIPT_LOADING
+                                                         CREDENTIAL_FORM_GONE
+                                                         CREDENTIAL_SUBMITTED
+                                                         CREDENTIAL_USERNAME_SUBMITTED
                                                          CUSTOM_ICON_LOADED
                                                          ENTRY_SELECTED
                                                          GET_CUSTOM_ICON
                                                          GET_ENTRY_LIST
                                                          LAUNCHING_POPUP
+                                                         LIST_KIND_PASSKEY
+                                                         LIST_KIND_PASSWORD
                                                          OKP_PASSKEY_CREATE
                                                          OKP_PASSKEY_GET
                                                          PASSKEY_CREATE_CANCELLED
@@ -43,6 +53,9 @@
                                                          PASSKEY_GROUP_CHOSEN
                                                          RECONNECT_APP
                                                          REDETECT_FIELDS
+                                                         SAVE_LOGIN_CONFIRMED
+                                                         SAVE_LOGIN_DISMISSED
+                                                         SAVE_LOGIN_NEVER_FOR_SITE
                                                          START_ASSOCIATION
                                                          TOGGLE_SITE_DISABLED]]
    [onekeepass.browser.common.site-matching :as site-matching]
@@ -285,16 +298,31 @@
                                                   :message-data (assoc icon-data
                                                                        :message-type CUSTOM_ICON_LOADED)}]]}))))
 
-;; Routes an ENTRY_SELECTED message to either the passkey assertion flow or the
-;; normal password-fill flow, depending on whether a passkey get request is pending.
+;; Routes an ENTRY_SELECTED message by the list the user picked it from:
+;; - a pick in the passkey list completes the pending passkey sign-in; with no
+;;   passkey request pending (a stale list) it is ignored
+;; - a pick in the password list fills the username/password, even while a passkey
+;;   request is pending in the tab (e.g. a site that asks for a passkey in the
+;;   background while showing its password form)
+;; The list kind comes from the list the background sent, so a password entry can
+;; never be sent to the passkey flow or the other way round.
 (reg-event-fx
  :route-entry-selected
- (fn [{:keys [db]} [_event-id sender-info entry-info]]
-   (let [pending (get db :pending-webauthn)]
-     (if (and pending (= (:type pending) :get)
-              (nil? (:selection-id entry-info))
-              (= (:tab-id sender-info) (:tab-id pending)))
-       {:fx [[:dispatch [:passkey/entry-selected entry-info]]]}
+ (fn [{:keys [db]} [_event-id sender-info {:keys [list-kind] :as entry-info}]]
+   (let [pending (get db :pending-webauthn)
+         ;; Only a passkey request of the same tab can be completed
+         passkey-get-pending? (and pending (= (:type pending) :get)
+                                   (= (:tab-id sender-info) (:tab-id pending)))
+         entry-info (select-keys entry-info [:db-key :entry-uuid :selection-id])]
+     (cond
+       ;; A passkey list pick carries no selection-id (that is bound to a password
+       ;; list pick) and is never marked as a password list pick
+       (and (not= list-kind LIST_KIND_PASSWORD) (nil? (:selection-id entry-info)))
+       (if passkey-get-pending?
+         {:fx [[:dispatch [:passkey/entry-selected (select-keys entry-info [:db-key :entry-uuid])]]]}
+         {})
+
+       :else
        {:fx [[:dispatch [:load-selected-entry-detail sender-info entry-info]]]}))))
 
 ;; Sends a request to the proxy app through the app-port by native messaging
@@ -421,6 +449,10 @@
       ;; Show error error popup in the content script 
       :fx [[:dispatch  [:common/send-error-message-to-current-tab {:error-message "Browser is not supported by OneKeePass App"}]]]}
 
+     ;; A login check or save failed in the app (e.g. the database got locked)
+     (contains? #{CHECK_LOGIN_CREDENTIAL SAVE_LOGIN_CREDENTIAL} action)
+     {:fx [[:dispatch [:credential/app-error error-resp]]]}
+
      ;; This may never be sent to the content script side as when the proxy app after sending this error, it closes the connection
      ;; This results in app-ports onDisconnect event getting called and handled in :app-disconnected event handler
      ;; Should we just log this error  and not to send to content script ?
@@ -499,6 +531,16 @@
       ;; The disconnect message from proxy. The proxy is exits after sending this message so onDiscoonect is also called
       DISCONNECT
       (dispatch [:native-app-not-available])
+
+      ;; ── Saving a submitted login ─────────────────────────────────────────────
+
+      ;; Whether the submitted login is new, changed or already stored
+      LOGIN_CREDENTIAL_CHECKED
+      (dispatch [:credential/check-received ok-resp])
+
+      ;; The confirmed login was added or updated
+      LOGIN_CREDENTIAL_SAVED
+      (dispatch [:credential/saved ok-resp])
 
       ;; ── Passkey responses ────────────────────────────────────────────────────
 
@@ -633,7 +675,9 @@
      :tab-url tab-url
      :frame-id frameId
      :document-id documentId
-     :frame-url url}))
+     :frame-url url
+     ;; Private window: logins submitted there are never offered for saving
+     :incognito (boolean (j/get tab :incognito))}))
 
 (defn- received-content-loading [sender send-response]
   (let [{:keys [url frameId tab]} (j/lookup sender)
@@ -671,6 +715,9 @@
         tab-id (j/get tab :id)
         tab-url (j/get tab :url)]
     #_(u/okp-println "tab-id frameId url tab-url LOGIN FILEDS" tab-id frameId url tab-url)
+
+    ;; A login form showing up right after a login submit means the login failed
+    (credential-save/on-login-form-seen (select-sender-keys sender))
 
     (dispatch [:content/login-fields-identified {:tab-id tab-id :tab-url tab-url :frame-id frameId}])))
 
@@ -732,13 +779,39 @@
          (app-reconnect sender-info)
 
          ;; Background gets this message from content script to get the basic entry info from the main app.
-         ;; Route to passkey flow if a passkey assertion is pending; otherwise normal password flow.
+         ;; Routed by the list the entry was picked from: passkey list -> passkey sign-in,
+         ;; password list -> password fill (see :route-entry-selected).
          ENTRY_SELECTED
-         (dispatch [:route-entry-selected sender-info (select-keys message-data [:db-key :entry-uuid :selection-id])])
+         (dispatch [:route-entry-selected sender-info (select-keys message-data [:db-key :entry-uuid :selection-id :list-kind])])
 
          REDETECT_FIELDS
          (dispatch [:common/send-message-to-current-tab
                     {:message-type REDETECT_FIELDS}])
+
+         ;; ── Saving a submitted login ──────────────────────────────────────────
+         ;; The password stays in credential-save's private state; it is not
+         ;; passed through re-frame events
+         CREDENTIAL_SUBMITTED
+         (credential-save/on-credential-submitted sender-info message-data)
+
+         CREDENTIAL_USERNAME_SUBMITTED
+         (credential-save/on-username-submitted sender-info message-data)
+
+         CREDENTIAL_FORM_GONE
+         (credential-save/on-form-gone sender-info)
+
+         ;; From the save-login popup iframe, relayed by the tab's content script.
+         ;; The sender's tab identifies the captured login; the popup sends only
+         ;; the user's choice
+         SAVE_LOGIN_CONFIRMED
+         (dispatch [:credential/save-confirmed (:tab-id sender-info)
+                    (select-keys message-data [:choice :db-key :entry-uuid :group-uuid :title])])
+
+         SAVE_LOGIN_DISMISSED
+         (dispatch [:credential/dismissed (:tab-id sender-info)])
+
+         SAVE_LOGIN_NEVER_FOR_SITE
+         (dispatch [:credential/never-for-site (:tab-id sender-info)])
 
          ;; Firefox passkey relay — content script forwards these from the MAIN world
          OKP_PASSKEY_CREATE

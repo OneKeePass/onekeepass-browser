@@ -40,6 +40,7 @@
             GET_OPENED_DATABASES_FOR_PASSKEY
             GET_PASSKEY_LIST]]
    [onekeepass.browser.common.message-type-names :refer [BACKGROUND_ERROR
+                                                         LIST_KIND_PASSKEY
                                                          NO_BROWSER_ENABLED_DB
                                                          NO_MATCHING_PASSKEYS
                                                          OKP_PASSKEY_BROWSER_DEFAULT
@@ -396,6 +397,7 @@
        (let [matched-entries (passkey-summaries->matched-entries passkey-list)]
          {:fx [[:common/send-content-message-regfx
                 {:message-data {:message-type   SHOW_PASSKEY_LIST
+                                :list-kind      LIST_KIND_PASSKEY
                                 :matched-entries matched-entries}
                  :tab-id       tab-id
                  :frame-id     0}]]})))))
