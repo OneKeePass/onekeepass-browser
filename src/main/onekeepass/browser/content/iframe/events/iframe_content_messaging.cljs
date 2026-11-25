@@ -10,6 +10,7 @@
                                                          CLOSE_SAVE_LOGIN_POPUP
                                                          CLOSE_SETTINGS_POPUP
                                                          CUSTOM_ICON_LOADED
+                                                         ENTRY_LIST_KEY
                                                          ENTRY_SELECTED
                                                          GET_CUSTOM_ICON
                                                          MSG_BOX_MESSAGE
@@ -38,6 +39,13 @@
    [onekeepass.browser.content.inject.db-icons :as db-icons]
    [re-frame.core :refer [dispatch reg-event-fx reg-sub subscribe]]))
 
+
+;; Set by the entry list popup: called with the arrow / Enter keys the content
+;; script forwards from the login field
+(defonce ^:private entry-list-key-handler (atom nil))
+
+(defn set-entry-list-key-handler! [f]
+  (reset! entry-list-key-handler f))
 
 (defn- content-message-handler
   "This is used in iframe to handle the message received from content scripts"
@@ -77,6 +85,10 @@
 
       SHOW_SAVE_LOGIN_POPUP
       (dispatch [:iframe-save-login/data-received message-data])
+
+      ENTRY_LIST_KEY
+      (when-let [f @entry-list-key-handler]
+        (f (:key message-data)))
 
       SAVE_LOGIN_RESULT
       (dispatch [:iframe-save-login/result-received message-data])
@@ -146,13 +158,15 @@
 (defn send-save-login-confirmed
   "Called from the save-login popup when the user clicks Save or Update.
    choice is \"add\" (with db-key, group-uuid, title) or \"update\" (with db-key, entry-uuid)"
-  [{:keys [choice db-key entry-uuid group-uuid title]}]
+  [{:keys [choice db-key entry-uuid group-uuid title username]}]
   (iframe-content-conn/send-message-to-content {:message-type SAVE_LOGIN_CONFIRMED
                                                 :choice       choice
                                                 :db-key       db-key
                                                 :entry-uuid   entry-uuid
                                                 :group-uuid   group-uuid
-                                                :title        title}))
+                                                :title        title
+                                                ;; For a new entry: the username as the user corrected it
+                                                :username     username}))
 
 (defn send-save-login-dismissed
   "Called from the save-login popup when the user clicks Not now"

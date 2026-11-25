@@ -51,6 +51,7 @@ When you navigate to a login page, the extension automatically detects username 
    - Entries are grouped by database name if multiple databases are open
    - Each entry shows its title and username
 3. Click the entry you want -- the username and password fields are filled automatically
+   - Or use the keyboard without leaving the field: ↑ / ↓ to choose, Enter to fill, Escape to close the list
 
 ### When No Matches Are Found
 

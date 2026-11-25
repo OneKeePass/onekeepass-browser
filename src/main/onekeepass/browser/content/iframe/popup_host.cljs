@@ -2,7 +2,8 @@
   (:require
    [applied-science.js-interop :as j]
    [onekeepass.browser.common.frame-security :as frame-security]
-   [onekeepass.browser.common.message-type-names :refer [CLOSE_ENTRY_LIST_POPUP
+   [onekeepass.browser.common.message-type-names :refer [POPUP_FRAME_MESSAGE
+                                                         CLOSE_ENTRY_LIST_POPUP
                                                          LIST_KIND_PASSKEY
                                                          LIST_KIND_PASSWORD
                                                          CLOSE_PASSKEY_CREATE_POPUP
@@ -25,7 +26,6 @@
    [onekeepass.browser.common.utils :as u]
    [onekeepass.browser.content.common-ui :as common-ui]
    [onekeepass.browser.content.context :as context]
-   [onekeepass.browser.content.iframe.dragging-support :as dragging-support]
    [onekeepass.browser.content.iframe.events.content-iframe-messaging :as content-iframe-messaging]
    [onekeepass.browser.content.events.messaging :as messaging-event]
    [onekeepass.browser.content.inject.listener-store :as listener-store]
@@ -105,36 +105,6 @@
 (defn- close-settings-popup []
   (remove-host-element-by-id (form-element-id OKP_SETTINGS_TAG_NAME)))
 
-(defn- create-close-button [on-close-fn]
-  (let [btn (js/document.createElement "span")]
-    (set! (.-innerText btn) "×")
-    (j/assoc! btn :title "Close")
-    (set! (.-cssText (.-style btn))
-          (str "cursor: pointer;"
-               "position: absolute;"
-               "right: 6px;"
-               "top: 5px;"
-               "width: 24px;"
-               "height: 24px;"
-               "border-radius: 6px;"
-               "text-align: center;"
-               "font-size: 18px;"
-               "line-height: 23px;"
-               "color: rgba(255,255,255,0.85);"
-               "user-select: none;"))
-
-    ;; Add hover effect for better UX
-    (.addEventListener btn "mouseover" #(set! (.-background (.-style btn)) "rgba(255,255,255,0.18)"))
-    (.addEventListener btn "mouseout"  #(set! (.-background (.-style btn)) "transparent"))
-
-    ;; The Click Handler
-    (.addEventListener btn "click"
-                       (fn [e]
-                         ;; CRITICAL: Stop propagation so clicking 'X' doesn't start a Drag event
-                         (.stopPropagation e)
-                         (on-close-fn)))
-    btn))
-
 (defn- create-host-element 
   "Creates a host element for the shadowdom use"
   [tag-name host-styles]
@@ -192,51 +162,45 @@
                   "background: transparent;"))
     iframe))
 
-;; The card inside a popup iframe is inset by this much on each side (the room
-;; its shadow needs); the drag handle above it is inset the same way
-(def ^:private CARD_INSET 6)
+;; Floating popups (dragging-support) draw their own header with a close button,
+;; which is also the drag area (see okp-theme/popup-header). The iframe url tells
+;; the popup page it is a floating one.
+(defn- iframe-src-for [src floating?]
+  (if floating? (str src "?floating=1") src))
 
-(defn- iframe-src-with-handle
-  "Tells the popup page it is shown under a drag handle, so its card joins it"
-  [src dragging-support]
-  (if dragging-support (str src "?handle=1") src))
+(defn- move-host!
+  "Moves a floating popup by dx/dy pixels, keeping a part of it on screen"
+  [^js host-element dx dy]
+  (let [rect (.getBoundingClientRect host-element)
+        style (.-style host-element)
+        left (-> (+ (.-left rect) dx) (max -300) (min (- js/window.innerWidth 80)))
+        top (-> (+ (.-top rect) dy) (max 0) (min (- js/window.innerHeight 48)))]
+    (.setProperty style "right" "auto")
+    (.setProperty style "left" (str left "px"))
+    (.setProperty style "top" (str top "px"))))
 
-(defn- create-drag-handle []
-  (let [handle (js/document.createElement "div")]
+(defn- listen-popup-frame!
+  "Moves or closes a floating popup when its own iframe asks. Only messages whose
+   source is this popup's iframe window are acted on, so the page cannot move or
+   close the popup by posting look-alike messages"
+  [^js host-element ^js iframe-element close-popup]
+  (letfn [(listener [^js e]
+            (let [data (.-data e)]
+              (cond
+                (not (.-isConnected host-element))
+                (js/window.removeEventListener "message" listener)
 
-    (j/assoc! handle :innerText "OneKeePass")
-
-    ;; A slim title bar joined to the popup card below it (same inset and corner
-    ;; radius). The color is okp-theme/accent
-    (j/assoc-in! handle [:style :cssText]
-                 (str
-                  "position: relative;"
-                  "margin: 6px " CARD_INSET "px 0 " CARD_INSET "px;"
-                  "width: " (- POPUP_ACTION_BOX_WIDTH (* 2 CARD_INSET)) "px;"
-                  "height: 34px;"
-                  "background: #2f6fed;"
-                  "color: #fff;"
-                  "font-family: Roboto, system-ui, -apple-system, 'Segoe UI', sans-serif;"
-                  "font-size: 13px;"
-                  "font-weight: 600;"
-                  "letter-spacing: 0.01em;"
-                  "line-height: 34px;"
-                  "padding-left: 14px;"
-                  "box-sizing: border-box;"
-                  "cursor: move;"
-                  "border-top-left-radius: 12px;"
-                  "border-top-right-radius: 12px;"
-                  "box-shadow: 0 -2px 10px rgba(15,23,42,0.10);"
-                  "user-select: none;")) ;; Prevent text highlighting while dragging
-    ;; This also works showing title
-    #_(let [txt-el (js/document.createElement "span")]
-        (j/assoc! txt-el :innerText "OneKeePass")
-        (.appendChild handle txt-el))
-    
-    handle))
+                (and data
+                     (= (.-type data) POPUP_FRAME_MESSAGE)
+                     (identical? (.-source e) (.-contentWindow iframe-element)))
+                (case (.-action data)
+                  "drag" (move-host! host-element (.-dx data) (.-dy data))
+                  "close" (close-popup)
+                  nil))))]
+    (js/window.addEventListener "message" listener)))
 
 (defn- create-popup-internal [{:keys [iframe-src tag-name box-width box-height close-popup dragging-support ]}]
-  (let [iframe-src (iframe-src-with-handle (js/chrome.runtime.getURL iframe-src) dragging-support)
+  (let [iframe-src (iframe-src-for (js/chrome.runtime.getURL iframe-src) dragging-support)
         ;; Here 'right' value is the px that determines the x coordinate of the popup from right
         ;; Looks like this is diffrent from viewport right as per the diagram in the pagehttps://developer.mozilla.org/en-US/docs/Web/API/Element/getBoundingClientRect
         ;; Is it so?.
@@ -244,27 +208,16 @@
 
         host-element    (create-host-element tag-name {:right (+ box-width 5)  :top 5})
         iframe-element  (create-iframe {:src iframe-src :width box-width :height box-height})
-        handle-element  (when dragging-support (create-drag-handle))
-        shadow-root (.attachShadow host-element #js {:mode "closed"})
-
-        ;; Define the close action
-        ;; close-action close-popup
-
-        close-btn (when dragging-support (create-close-button close-popup))]
-
-    (when dragging-support
-      (.appendChild handle-element close-btn)
-      ;; Handle goes on top
-      (.appendChild shadow-root handle-element))
+        shadow-root (.attachShadow host-element #js {:mode "closed"})]
 
 
     (.appendChild shadow-root iframe-element)
     (.appendChild js/document.body host-element)
 
-    #_(u/okp-println "2 Iframp popup: create-popup-internal custom element for iframe created and appended")
+    (when dragging-support
+      (listen-popup-frame! host-element iframe-element close-popup))
 
     {:host-element host-element
-     :handle-element handle-element
      :iframe-element iframe-element}))
 
 #_(defn- create-main-popup-internal []
@@ -322,9 +275,7 @@
     #_(set! (.-height (.-style iframe-el)) (str h "px"))
     (set! (.-height (.-style iframe-element)) (str total-h "px"))
 
-    ;; Update Drag Handle width to match the card (inset on both sides)
-    (when handle-element
-      (set! (.-width (.-style handle-element)) (str (- total-w (* 2 CARD_INSET)) "px")))))
+    ))
 
 (defn- iframe-resize-message-listener
   "Adds a resize listener to receive resize data from ResizeObserver of iframe content. 
@@ -333,9 +284,11 @@
   (js/window.addEventListener "message"
                               (fn [e]
                                 (let [data (.-data e)
-                                      msg-type (.-type data)]
+                                      msg-type (when data (.-type data))]
                                   #_(u/okp-console-log "=== Data received" data)
-                                  (when (= msg-type message-type)
+                                  ;; Only the popup's own iframe can resize it
+                                  (when (and (= msg-type message-type)
+                                             (identical? (.-source e) (.-contentWindow iframe-element)))
                                     (adjust-width-height {:source message-type
                                                           :received-width (.-width data)
                                                           :received-height (.-height data)
@@ -358,8 +311,6 @@
                                 :box-height       330
                                 :close-popup      close-settings-popup
                                 :dragging-support true})]
-
-    (dragging-support/add-drag-support host-element iframe-element handle-element)
 
     (iframe-resize-message-listener
      {:iframe-element iframe-element
@@ -391,7 +342,6 @@
                                 :close-popup close-main-popup})]
 
     ;; Iframe drag and drop 
-    (dragging-support/add-drag-support host-element iframe-element handle-element)
 
     ;; Ensures a proper iframe size based on content
     #_(iframe-resize-message-listener iframe-element handle-element)
@@ -422,7 +372,6 @@
                                 :dragging-support true
                                 :close-popup close-msg-popup})]
     ;; Iframe drag and drop 
-    (dragging-support/add-drag-support host-element iframe-element handle-element)
 
     ;; Ensures a proper iframe size based on content
     #_(iframe-resize-message-listener iframe-element handle-element)
@@ -442,7 +391,7 @@
 ;;;;;;;;;;;
 
 (defn- create-entry-list-popup-internal [{:keys [iframe-src tag-name host-left host-top width dragging-support close-popup]}]
-  (let [iframe-src (iframe-src-with-handle (js/chrome.runtime.getURL iframe-src) dragging-support)
+  (let [iframe-src (iframe-src-for (js/chrome.runtime.getURL iframe-src) dragging-support)
         ;; Here 'right' value is the px that determines the x coordinate of the popup from right
         ;; Looks like this is diffrent from viewport right as per the diagram in the pagehttps://developer.mozilla.org/en-US/docs/Web/API/Element/getBoundingClientRect
         ;; Is it so?.
@@ -450,21 +399,15 @@
 
         host-element    (create-host-element tag-name {:left host-left :top host-top})
         iframe-element  (create-iframe {:src iframe-src :width width :height 100})
-        handle-element  (when dragging-support (create-drag-handle))
-        close-btn       (when dragging-support (create-close-button close-popup))
         shadow-root (.attachShadow host-element #js {:mode "closed"})]
-
-    (when dragging-support
-      (.appendChild handle-element close-btn)
-      (.appendChild shadow-root handle-element))
 
     (.appendChild shadow-root iframe-element)
     (.appendChild js/document.body host-element)
 
-    #_(u/okp-println "2 Iframp popup: create-entry-list-popup-internal custom element for iframe created and appended")
+    (when dragging-support
+      (listen-popup-frame! host-element iframe-element close-popup))
 
     {:host-element   host-element
-     :handle-element handle-element
      :iframe-element iframe-element}))
 
 (defn- calculate-list-positions [input-element]
@@ -529,8 +472,48 @@
           :width            420
           :dragging-support true
           :close-popup      close-entry-list-popup})]
-    (dragging-support/add-drag-support host-element iframe-element handle-element)
     (setup-entry-list-popup iframe-element)))
+
+;; Keyboard use of the anchored entry list while the focus stays in the field:
+;; ArrowUp / ArrowDown move through the list, Enter fills the highlighted entry,
+;; Escape closes the list. Only trusted key events are forwarded, so the page
+;; cannot pick an entry by faking keys. Enter is taken over only once the arrows
+;; were used, so a plain Enter still submits the page's form.
+(defonce ^:private entry-list-key-listener (atom nil))
+
+(defn- entry-list-open? []
+  (some? (js/document.getElementById (form-element-id OKP_ENTRY_LIST_TAG_NAME))))
+
+(defn- listen-entry-list-keys! [input]
+  (when-let [old @entry-list-key-listener]
+    (js/window.removeEventListener "keydown" old true))
+  (let [navigated? (atom false)
+        listener (fn [^js e]
+                   (when (and (.-isTrusted e)
+                              (entry-list-open?)
+                              (identical? (common-ui/deep-active-element) input))
+                     (let [key (.-key e)
+                           take! (fn []
+                                   (.preventDefault e)
+                                   (.stopPropagation e))]
+                       (case key
+                         ("ArrowDown" "ArrowUp")
+                         (do (take!)
+                             (reset! navigated? true)
+                             (content-iframe-messaging/send-entry-list-key key))
+
+                         "Enter"
+                         (when @navigated?
+                           (take!)
+                           (content-iframe-messaging/send-entry-list-key key))
+
+                         "Escape"
+                         (do (take!)
+                             (close-entry-list-popup))
+
+                         nil))))]
+    (reset! entry-list-key-listener listener)
+    (js/window.addEventListener "keydown" listener true)))
 
 (defn- create-entry-list-popup-anchored
   "Renders the entry list popup anchored directly under the focused login input."
@@ -546,6 +529,11 @@
       ;; outside-click listener which could leave the previous popup open.)
       (remove-host-element-by-id (form-element-id OKP_ENTRY_LIST_TAG_NAME))
       (let [{:keys [top left width]} (calculate-list-positions focused-input)
+            ;; The card sits inside the iframe with a margin for its shadow
+            ;; (okp-theme/CARD_MARGIN): shift so the card lines up with the field
+            left (- left 12)
+            top (- top 8)
+            width (+ width 24)
             {:keys [iframe-element]} (create-entry-list-popup-internal
                                       {:iframe-src "entry_list_popup.html"
                                        :tag-name OKP_ENTRY_LIST_TAG_NAME
@@ -553,6 +541,7 @@
                                        :host-top top
                                        :width width})]
         (listener-store/add-entry-list-outside-clicked-listener (entry-list-outside-click-handler focused-input))
+        (listen-entry-list-keys! focused-input)
         (setup-entry-list-popup iframe-element)))))
 
 (defn create-entry-list-popup
@@ -586,8 +575,6 @@
 
     (reset! entry-list-popup-iframe-element-store iframe-element)
 
-    (dragging-support/add-drag-support host-element iframe-element handle-element)
-
     (iframe-resize-message-listener
      {:iframe-element iframe-element
       :handle-element handle-element
@@ -614,8 +601,6 @@
                                 :close-popup      dismiss-save-login-popup
                                 :dragging-support true})]
 
-    (dragging-support/add-drag-support host-element iframe-element handle-element)
-
     (iframe-resize-message-listener
      {:iframe-element iframe-element
       :handle-element handle-element
@@ -641,8 +626,6 @@
                                 :box-width        POPUP_ACTION_BOX_WIDTH
                                 :close-popup      cancel-passkey-create-popup
                                 :dragging-support true})]
-
-    (dragging-support/add-drag-support host-element iframe-element handle-element)
 
     (iframe-resize-message-listener
      {:iframe-element iframe-element

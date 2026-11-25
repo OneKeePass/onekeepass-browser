@@ -258,6 +258,14 @@
                                                 :update-candidates (:update-candidates check)
                                                 :save-targets (:save-targets check)}}}]]}))))
 
+(defn- corrected-username
+  "The username to save: for a new entry the one the user may have corrected in the
+   popup (plain text, bounded), otherwise the captured one"
+  [{:keys [choice] corrected :username} captured]
+  (if (and (= choice "add") (string? corrected) (<= (count corrected) 4096))
+    (str/trim corrected)
+    captured))
+
 (defn- valid-choice?
   "Checks the popup's choice against the app's own check answer, so only an entry
    the app offered can be updated and only an offered database/group written to"
@@ -291,7 +299,10 @@
        (if-let [request (encrypted-request SAVE_LOGIN_CREDENTIAL capture-id
                                            {:db-key db-key
                                             :url origin
-                                            :username username
+                                            ;; A new entry takes the username as corrected in the
+                                            ;; popup; an update keeps the captured one (the app
+                                            ;; checks it against the entry)
+                                            :username (corrected-username choice-m username)
                                             :password password
                                             :entry-uuid (when (= choice "update") entry-uuid)
                                             :group-uuid (when (= choice "add") group-uuid)

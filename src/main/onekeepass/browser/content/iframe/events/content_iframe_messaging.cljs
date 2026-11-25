@@ -11,6 +11,7 @@
                                                          CLOSE_SAVE_LOGIN_POPUP
                                                          CLOSE_SETTINGS_POPUP
                                                          CUSTOM_ICON_LOADED
+                                                         ENTRY_LIST_KEY
                                                          ENTRY_SELECTED
                                                          GET_CUSTOM_ICON
                                                          LIST_KIND_PASSKEY
@@ -136,7 +137,7 @@
       SAVE_LOGIN_CONFIRMED
       (dispatch [:send-save-login-message
                  (merge {:message-type SAVE_LOGIN_CONFIRMED}
-                        (select-keys message-data [:choice :db-key :entry-uuid :group-uuid :title]))])
+                        (select-keys message-data [:choice :db-key :entry-uuid :group-uuid :title :username]))])
 
       SAVE_LOGIN_DISMISSED
       (do
@@ -194,6 +195,11 @@
 
 (defn send-custom-icon-loaded-message [message-data]
   (dispatch [:content-iframe/custom-icon-loaded message-data]))
+
+(defn send-entry-list-key
+  "Forwards an arrow / Enter key pressed in the login field to the entry list popup"
+  [key]
+  (content-iframe-conn/send-message-to-iframe {:message-type ENTRY_LIST_KEY :key key}))
 
 (defn send-save-login-data-message
   "Called to send the save-login data (stored as :save-login-data in content db) to the save-login popup iframe after launch"

@@ -1,7 +1,8 @@
 # Native messaging: saving submitted logins
 
-This describes the two native messaging actions the desktop app has to handle for the
-extension's save-login feature. The database logic is in `onekeepass-core`
+This describes the two native messaging actions the desktop app handles for the
+extension's save-login feature (implemented in OneKeePass/desktop
+`src-tauri/src/browser_service`, see the matching desktop branch). The database logic is in `onekeepass-core`
 (`db_service::browser_extension`); the desktop app only decrypts the request, calls
 core and encrypts the reply.
 

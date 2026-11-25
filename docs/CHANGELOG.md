@@ -16,7 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Redesigned popups.** The entry list, save-login, passkey, message and settings popups share a new look: rounded cards, a cleaner entry list with site name, search for long lists and 2FA / passkey badges, and a dark variant that follows the system color scheme.
+- **Redesigned popups.** The entry list, save-login, passkey, message and settings popups share a new look: one card with its own header (logo, title, close button; drag it by the header), smooth entrance and exit animations (off when the system asks for reduced motion), letter avatars, search for long lists, 2FA / passkey badges, and a dark variant that follows the system color scheme.
+- **Keyboard use of the entry list.** With the focus still in the login field, use ↑ / ↓ to choose an entry, Enter to fill it and Escape to close the list.
+- **Save prompt.** Shows the username (editable for a new entry) and the password as dots only; the password itself never reaches the popup.
 
 ### Fixed
 

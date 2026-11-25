@@ -815,7 +815,7 @@
          ;; the user's choice
          SAVE_LOGIN_CONFIRMED
          (dispatch [:credential/save-confirmed (:tab-id sender-info)
-                    (select-keys message-data [:choice :db-key :entry-uuid :group-uuid :title])])
+                    (select-keys message-data [:choice :db-key :entry-uuid :group-uuid :title :username])])
 
          SAVE_LOGIN_DISMISSED
          (dispatch [:credential/dismissed (:tab-id sender-info)])

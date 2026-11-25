@@ -239,7 +239,9 @@
    {:component-did-mount (fn [_] (load-settings!))
     :reagent-render
     (fn []
-      [mui-box {:sx (merge (okp-theme/card-sx) {:p 2 :min-width 360})}
+      [mui-box {:sx (merge (okp-theme/card-sx) {:min-width 360})}
+       [okp-theme/popup-header {:title "Settings"}]
+       [mui-box {:sx {:px 2 :pb 2 :pt 0.5}}
 
        ;; Section: Passkeys
        [section-header "Passkeys"]
@@ -290,7 +292,7 @@
                      :on-click (fn []
                                  (save-settings!
                                   (fn [] (iframe-content-messaging/close-settings-popup))))}
-         "Save"]]])}))
+         "Save"]]]])}))
 
 (defn- main-content []
   [settings-content])

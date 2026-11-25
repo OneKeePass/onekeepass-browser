@@ -56,9 +56,6 @@
     (when (and (= 1 (count dbs)) (nil? @selected-db-key))
       (reset! selected-db-key (:db-key (first dbs))))
     [mui-stack {:spacing 1}
-     [mui-stack {:sx {:text-align "center" :align-items "center"}}
-      [mui-typography {:variant "subtitle1" :sx {:font-weight "bold"}} "Save Passkey"]]
-
      (when rp-name
        [mui-typography {:variant "body2" :color "text.secondary"} (str "Site: " rp-name)])
      [mui-divider]
@@ -212,9 +209,9 @@
 ;; ── Step 5: Success ───────────────────────────────────────────────────────────
 
 (defn- step-success []
-  [mui-stack {:spacing 1 :align-items "center" :sx {:py 4}}
-   [mui-typography {:variant "h5" :color "success.main"} "✓"]
-   [mui-typography {:variant "body1"} "Passkey saved!"]])
+  [mui-stack {:spacing 1 :align-items "center" :sx {:py 3 :color "success.main"}}
+   [okp-theme/success-check 52]
+   [mui-typography {:variant "body1" :sx {:font-weight 600 :color "text.primary"}} "Passkey saved"]])
 
 ;; ── main content ──────────────────────────────────────────────────────────────
 
@@ -231,14 +228,16 @@
     (when (and (not= @current-step :success) success?)
       (reset! current-step :success)
       (js/setTimeout #(iframe-content-messaging/send-passkey-create-cancelled) 1500))
-    [mui-box {:sx (merge (okp-theme/card-sx) {:min-height 80 :padding "12px 14px"})}
+    [mui-box {:sx (merge (okp-theme/card-sx :notification) {:min-height 80})}
+     [okp-theme/popup-header {:title "Save passkey" :detail rp-name}]
+     [mui-box {:sx {:px 1.75 :pb 1.5}}
      (case @current-step
        :db-pick        [step-db-pick {:databases databases :rp-name rp-name}]
        :group-pick     [step-group-pick groups]
        :entry-pick     [step-entry-pick entries rp-name]
        :confirm-cancel [step-confirm-cancel]
        :saving         [step-saving]
-       :success        [step-success])]))
+       :success        [step-success])]]))
 
 ;; ── auto-resize ───────────────────────────────────────────────────────────────
 

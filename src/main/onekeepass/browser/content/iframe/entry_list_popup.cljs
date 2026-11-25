@@ -7,7 +7,10 @@
    - 2FA code list (purpose otp, from a one-time code field): only entries with a
      TOTP; picking one fills the current code. The entry just used to sign in on
      this tab is suggested first
-   - passkey list: the site's passkeys; picking one completes the sign-in"
+   - passkey list: the site's passkeys; picking one completes the sign-in
+
+   It can be used from the keyboard while the focus stays in the login field: the
+   content script forwards ArrowUp / ArrowDown / Enter (ENTRY_LIST_KEY)."
   (:require
    [applied-science.js-interop :as j]
    [clojure.string :as str]
@@ -30,9 +33,15 @@
 
 (defonce ^:private search-term (r/atom ""))
 
+;; Index (in the visible rows) of the row highlighted with the arrow keys, or nil
+(defonce ^:private active-index (r/atom nil))
+
+;; The visible rows of the last render, for the keyboard handler
+(defonce ^:private visible-rows (atom []))
+
 (defn- delayed-close-popup []
   (js/window.setTimeout
-   (fn [] (iframe-content-messaging/close-entry-list-popup)) 300))
+   (fn [] (iframe-content-messaging/close-entry-list-popup)) 240))
 
 ;; Clickjacking hardening: act only on a genuine user gesture. A page-
 ;; dispatched synthetic click has isTrusted=false; a real click inside our
@@ -70,30 +79,35 @@
     (or (str/blank? term)
         (some #(str/includes? (str/lower-case (or % "")) term) [title secondary-title db-name]))))
 
+;; ── selection ────────────────────────────────────────────────────────────────
+
+(defn- select-row! [{:keys [db-key uuid]} list-kind]
+  (iframe-content-messaging/send-entry-selected db-key uuid list-kind)
+  (delayed-close-popup))
+
+(defn on-entry-list-key
+  "Called with an arrow / Enter key the user pressed in the login field the list
+   is open for (forwarded by the content script only for trusted key events)"
+  [key list-kind]
+  (let [n (count @visible-rows)]
+    (when (pos? n)
+      (case key
+        "ArrowDown" (swap! active-index #(if (nil? %) 0 (mod (inc %) n)))
+        "ArrowUp" (swap! active-index #(if (nil? %) (dec n) (mod (dec %) n)))
+        "Enter" (when-let [i @active-index]
+                  (when-let [row (get @visible-rows i)]
+                    (select-row! row list-kind)))
+        nil))))
+
 ;; ── pieces ───────────────────────────────────────────────────────────────────
 
 (defn- badge [text]
   [mui-box {:component "span"
-            :sx {:font-size "10.5px" :font-weight 600 :letter-spacing "0.03em"
+            :sx {:font-size "10.5px" :font-weight 600 :letter-spacing "0.02em"
                  :line-height "18px" :px 0.75 :border-radius "6px"
                  :color "primary.main" :bgcolor "action.selected"
                  :white-space "nowrap"}}
    text])
-
-(defn- header [{:keys [title host]}]
-  [mui-stack {:direction "row" :align-items "center" :spacing 1
-              :sx {:px 1.5 :pt 1.25 :pb 0.75}}
-   [mui-box {:sx {:display "flex" :align-items "center" :justify-content "center"
-                  :width 22 :height 22 :border-radius "6px"
-                  :bgcolor "primary.main" :color "#fff"}}
-    [mui-icon-vpn-key-outlined {:sx {:font-size 14}}]]
-   [mui-typography {:variant "subtitle2" :sx {:flex 1 :font-size "13px"}} title]
-   (when-not (str/blank? host)
-     [mui-typography {:variant "caption" :color "text.secondary"
-                      :title host
-                      :sx {:max-width "55%" :overflow "hidden" :text-overflow "ellipsis"
-                           :white-space "nowrap"}}
-      host])])
 
 ;; Clickjacking hardening: show the origin the credential will be filled
 ;; into, but ONLY when it differs from the top page origin - i.e the login fields
@@ -106,7 +120,7 @@
 ;; at the end of the host and clipping the tail would hide the part that matters.
 (defn- fill-target-notice [origin top]
   (when (and (seq origin) (seq top) (not= origin top))
-    [mui-box {:sx {:mx 1.5 :mb 1 :px 1.25 :py 0.75 :border-radius "8px"
+    [mui-box {:sx {:mx 1.5 :mb 1 :px 1.25 :py 0.75 :border-radius "10px"
                    :bgcolor "action.hover" :border "1px solid var(--okp-divider)"}}
      [mui-typography {:variant "caption" :color "text.secondary" :display "block"}
       (u/lstr "embeddedLoginFrom")]
@@ -120,30 +134,50 @@
    [:input {:type "search"
             :placeholder "Search entries"
             :value @search-term
-            :on-change #(reset! search-term (-> % .-target .-value))
+            :on-change (fn [e]
+                         (reset! search-term (-> e .-target .-value))
+                         (reset! active-index nil))
             :style okp-theme/input-style}]])
 
-(defn- entry-row [{:keys [db-key uuid title secondary-title icon-id custom-icon-uuid custom-icons
-                          db-name has-otp suggested]}
-                  {:keys [list-kind show-db?]}]
+(defn- entry-avatar [{:keys [db-key icon-id custom-icon-uuid custom-icons title]} list-kind]
+  (cond
+    (= list-kind LIST_KIND_PASSKEY)
+    [mui-box {:sx {:flex "none" :width 34 :height 34 :border-radius "9px"
+                   :display "flex" :align-items "center" :justify-content "center"
+                   :bgcolor "action.selected" :color "primary.main"}}
+     [mui-icon-vpn-key-outlined {:sx {:font-size 18}}]]
+
+    ;; The entry has its own icon (a custom one, or a KeePass icon other than the
+    ;; default key): show it
+    (or (seq custom-icon-uuid) (and icon-id (not (zero? icon-id))))
+    [mui-box {:sx {:flex "none" :width 34 :height 34 :border-radius "9px"
+                   :display "flex" :align-items "center" :justify-content "center"
+                   :bgcolor "action.hover" :font-size "19px"}}
+     [db-icons/render-entry-icon
+      {:db-key db-key
+       :icon-id icon-id
+       :custom-icon-uuid custom-icon-uuid
+       :custom-icons custom-icons
+       :request-custom-icon #(iframe-content-messaging/send-get-custom-icon db-key custom-icon-uuid)}]]
+
+    ;; Default icon: a letter avatar reads better in a short list
+    :else
+    [okp-theme/letter-avatar title 34]))
+
+(defn- entry-row [{:keys [title secondary-title db-name has-otp suggested] :as row}
+                  {:keys [list-kind show-db? index active?]}]
   [mui-list-item-button
-   {:on-click (fn [e]
+   {:selected active?
+    :ref (fn [el] (when (and el active?) (.scrollIntoView el #js {:block "nearest"})))
+    :on-mouse-enter #(reset! active-index index)
+    :on-click (fn [e]
                 (when (trusted-event? e)
-                  (iframe-content-messaging/send-entry-selected db-key uuid list-kind)
-                  (delayed-close-popup)))
-    :sx {:mx 0.75 :my 0.25 :px 1 :py 0.75 :gap 1.25
-         "&:hover" {:bgcolor "action.hover"}}}
-   [mui-box {:sx {:flex "none" :width 32 :height 32 :border-radius "8px"
-                  :display "flex" :align-items "center" :justify-content "center"
-                  :bgcolor "action.hover" :font-size "18px"}}
-    (if (= list-kind LIST_KIND_PASSKEY)
-      [mui-icon-vpn-key-outlined {:sx {:font-size 18 :color "primary.main"}}]
-      [db-icons/render-entry-icon
-       {:db-key db-key
-        :icon-id icon-id
-        :custom-icon-uuid custom-icon-uuid
-        :custom-icons custom-icons
-        :request-custom-icon #(iframe-content-messaging/send-get-custom-icon db-key custom-icon-uuid)}])]
+                  (select-row! row list-kind)))
+    :sx (merge {:mx 0.75 :my 0.25 :px 1 :py 0.75 :gap 1.25
+                "&:hover" {:bgcolor "action.hover"}
+                "&.Mui-selected, &.Mui-selected:hover" {:bgcolor "action.selected"}}
+               (okp-theme/row-in-sx index))}
+   [entry-avatar row list-kind]
    [mui-box {:sx {:flex 1 :min-width 0}}
     [mui-typography {:variant "body2"
                      :sx {:font-weight 600 :overflow "hidden" :text-overflow "ellipsis"
@@ -159,9 +193,14 @@
       has-otp [badge "2FA"])]])
 
 (defn- empty-state [text]
-  [mui-typography {:variant "body2" :color "text.secondary"
-                   :sx {:px 2 :py 2 :text-align "center"}}
-   text])
+  [mui-stack {:align-items "center" :spacing 0.5 :sx {:px 2 :pt 1 :pb 2}}
+   [mui-typography {:variant "body2" :color "text.secondary" :sx {:text-align "center"}}
+    text]])
+
+(defn- key-hint []
+  [mui-typography {:variant "caption" :color "text.disabled" :component "div"
+                   :sx {:px 1.75 :pt 0.5 :pb 0.25 :font-size "11px"}}
+   "↑ ↓ to choose · Enter to fill"])
 
 ;; ── main content ─────────────────────────────────────────────────────────────
 
@@ -176,14 +215,16 @@
         top-origin @(iframe-content-messaging/top-origin)
         rows (flatten-entries matched-entries purpose suggested)
         show-db? (> (count (set (map :db-key rows))) 1)
-        visible (filter (partial matches-term? @search-term) rows)
+        visible (vec (filter (partial matches-term? @search-term) rows))
+        active @active-index
         title (cond
                 (= list-kind LIST_KIND_PASSKEY) "Sign in with a passkey"
                 (= purpose PURPOSE_OTP) "Fill 2FA code"
                 :else "OneKeePass")]
+    (reset! visible-rows visible)
     [mui-box {:sx (merge (okp-theme/card-sx) {:min-width 300 :pb 0.75})}
-     [header {:title title
-              :host (some-> top-origin (str/replace #"^https?://" ""))}]
+     [okp-theme/popup-header {:title title
+                              :detail (some-> top-origin (str/replace #"^https?://" ""))}]
      [fill-target-notice fill-target-origin top-origin]
      (when (> (count rows) SEARCH_THRESHOLD)
        [search-box])
@@ -197,12 +238,18 @@
        [empty-state "No entry matches your search"]
 
        :else
-       [mui-list {:dense true :disable-padding true
-                  :sx {:max-height 300 :overflow "auto"}}
-        (doall
-         (for [row visible]
-           ^{:key (str (:db-key row) (:uuid row))}
-           [entry-row row {:list-kind list-kind :show-db? show-db?}]))])]))
+       [:<>
+        [mui-list {:dense true :disable-padding true
+                   :sx {:max-height 300 :overflow "auto"}}
+         (doall
+          (map-indexed
+           (fn [i row]
+             ^{:key (str (:db-key row) (:uuid row))}
+             [entry-row row {:list-kind list-kind :show-db? show-db?
+                             :index i :active? (= i active)}])
+           visible))]
+        (when-not (okp-theme/floating?)
+          [key-hint])])]))
 
 ;; ── auto-resize ──────────────────────────────────────────────────────────────
 
@@ -227,6 +274,10 @@
 ;; ── entry point ──────────────────────────────────────────────────────────────
 
 (defn init []
+  ;; Keys forwarded by the content script from the login field
+  (iframe-content-messaging/set-entry-list-key-handler!
+   (fn [key] (on-entry-list-key key @(iframe-content-messaging/list-kind))))
+
   ;; Init the Iframe <-> Content communication channel
   (iframe-content-messaging/init-content-connection)
 

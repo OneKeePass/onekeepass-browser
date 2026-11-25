@@ -233,7 +233,7 @@
   (let [timer (atom nil)
         site-disabled? (:site-disabled @(iframe-content-messaging/site-disable-info))]
     [mui-box {:sx
-              (merge (okp-theme/card-sx) {:padding "2px"})
+              (okp-theme/card-sx)
 
               :ref (fn [ref]
                      #_(when ref
@@ -268,6 +268,9 @@
      [mui-stack  {:sx
                   ;; The min height is required
                   {:minHeight POPUP_ACTION_BOX_HEIGHT}}
+
+      [okp-theme/popup-header {:title "OneKeePass"
+                               :detail (:page-host @(iframe-content-messaging/site-disable-info))}]
 
       ;; Header part
       #_[mui-box {:component "header"

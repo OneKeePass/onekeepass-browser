@@ -66,10 +66,11 @@
 
     (when (or no-browser-enabled-db no-matching-entries no-matching-passkeys fields-not-filled background-error)
       [mui-box {:sx
-                (merge (okp-theme/card-sx) {:padding "2px"})}
+                (okp-theme/card-sx)}
        [mui-stack  {:sx
                     {:minHeight MESSAGE_BOX_HEIGHT ;; This is required
                      }}
+        [okp-theme/popup-header {:title "OneKeePass"}]
 
         ;; Header part
         #_[mui-box {:component "header" :sx {:bgcolor "primary.main" :min-height 30}}

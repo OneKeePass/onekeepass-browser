@@ -83,6 +83,14 @@
 
 (def REDETECT_FIELDS "REDETECT_FIELDS")
 
+;; window.postMessage type from a floating popup iframe to its host content script:
+;; drag the popup or close it (see okp-theme/popup-header and popup-host)
+(def POPUP_FRAME_MESSAGE "OKP_POPUP_FRAME")
+
+;; content -> entry list iframe: an arrow / Enter key pressed in the login field the
+;; list is open for, so the list can be used from the keyboard
+(def ENTRY_LIST_KEY "ENTRY_LIST_KEY")
+
 ;; Which list an entry-list popup shows. Sent with SHOW_ENTRY_LIST / SHOW_PASSKEY_LIST
 ;; and echoed back with ENTRY_SELECTED, so a pick in the password list always fills a
 ;; password and a pick in the passkey list always completes the passkey sign-in,
