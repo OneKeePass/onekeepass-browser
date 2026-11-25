@@ -6,7 +6,9 @@
 
 ;; :recv-seq tracks the last accepted sequence number from the native app.
 ;; Used to reject replayed encrypted messages (M-1 replay-attack protection).
-(def session-keys (atom {:client-keys nil :app-pub-key nil :recv-seq 0}))
+;; :send-seq is the counter for extension→app encrypted messages, so the app can
+;; reject replays the same way.
+(def session-keys (atom {:client-keys nil :app-pub-key nil :recv-seq 0 :send-seq 0}))
 
 (defn- create-keypair []
   (j/call-in nacl [:box :keyPair]))
@@ -21,7 +23,9 @@
   ;; client-keys is js object with props publicKey and secretKey
   (let [client-keys (create-keypair)]
     #_(js/console.log "kp is " client-keys)
-    (swap! session-keys assoc :client-keys client-keys)))
+    ;; A new session starts its send counter again; the app does the same for its
+    ;; receive counter when it gets the new session key.
+    (swap! session-keys assoc :client-keys client-keys :send-seq 0)))
 
 (defn encoded-client-public-key []
   (let [client-key-pair (:client-keys @session-keys)
@@ -43,7 +47,31 @@
   []
   (swap! session-keys assoc :recv-seq 0))
 
-#_(defn encrypt [message])
+(defn session-ready?
+  "True once the app's session public key has been received, i.e. encrypt can be used"
+  []
+  (and (some? (:client-keys @session-keys)) (some? (:app-pub-key @session-keys))))
+
+(defn encrypt
+  "Encrypts an extension→app message. The arg 'message' is a cljs map; it is sent as
+   JSON with snake_case keys, wrapped in the same replay-protection envelope the app
+   uses the other way:
+     {\"seq\": <monotonic-counter>, \"msg\": \"<message-json-string>\"}
+   Returns {:message <base64 ciphertext> :nonce <base64 nonce>}, or nil when the
+   session keys are not yet exchanged (the caller must then not send the message)."
+  [message-json-str]
+  (when (session-ready?)
+    (let [seq-no      (:send-seq (swap! session-keys update :send-seq inc))
+          envelope    (js/JSON.stringify #js {:seq seq-no :msg message-json-str})
+          nonce       (j/call nacl :randomBytes (j/get-in nacl [:box :nonceLength]))
+          sec-key     (.-secretKey ^js (:client-keys @session-keys))
+          app-pub-key (:app-pub-key @session-keys)
+          plain-bytes (.encode (js/TextEncoder.) envelope)
+          box         (j/call nacl :box plain-bytes nonce app-pub-key sec-key)]
+      ;; Wipe the plaintext copy we made; the box holds the only one we keep
+      (.fill plain-bytes 0)
+      {:message (j/call nacl.util :encodeBase64 box)
+       :nonce   (j/call nacl.util :encodeBase64 nonce)})))
 
 (defn decrypt
   "Decrypts an app→extension message. Returns the inner message string on success,

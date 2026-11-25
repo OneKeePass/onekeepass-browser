@@ -3,6 +3,7 @@
    The iframe is an extension page so it can read/write chrome.storage.local directly.
    The background reacts to storage changes via chrome.storage.onChanged."
   (:require
+   [onekeepass.browser.common.okp-theme :as okp-theme]
    [applied-science.js-interop :as j]
    [onekeepass.browser.common.message-type-names :refer [RESIZE_IFRAME_SETTINGS]]
    [onekeepass.browser.common.mui-components
@@ -23,6 +24,14 @@
 (def ^:private passkeys-enabled?       (r/atom true))
 (def ^:private saved-passkeys-enabled? (r/atom true))  ;; tracks the persisted value
 (def ^:private settings-loaded?        (r/atom false))
+
+;; Offer to save logins submitted on sites (on by default)
+(def ^:private save-logins-enabled?       (r/atom true))
+(def ^:private saved-save-logins-enabled? (r/atom true))
+
+;; Hosts the user chose 'Never for this site' on in the save-login popup
+(def ^:private never-save-sites       (r/atom []))
+(def ^:private saved-never-save-sites (r/atom []))
 
 ;; Vector of {:host "example.com" :include-subdomains true} maps
 (def ^:private disabled-sites          (r/atom []))
@@ -51,7 +60,13 @@
       (.then (fn [result]
                (let [settings (raw->settings (j/get result :okp-settings))
                      enabled? (get settings :passkeys-enabled true)
-                     sites    (vec (get settings :disabled-sites []))]
+                     sites    (vec (get settings :disabled-sites []))
+                     save-logins? (get settings :save-logins-enabled true)
+                     never-sites  (vec (get settings :never-save-sites []))]
+                 (reset! save-logins-enabled? save-logins?)
+                 (reset! saved-save-logins-enabled? save-logins?)
+                 (reset! never-save-sites never-sites)
+                 (reset! saved-never-save-sites never-sites)
                  (reset! passkeys-enabled? enabled?)
                  (reset! saved-passkeys-enabled? enabled?)
                  (reset! disabled-sites sites)
@@ -66,7 +81,9 @@
                (let [settings (raw->settings (j/get result :okp-settings))
                      updated  (assoc settings
                                      :passkeys-enabled @passkeys-enabled?
-                                     :disabled-sites @disabled-sites)]
+                                     :disabled-sites @disabled-sites
+                                     :save-logins-enabled @save-logins-enabled?
+                                     :never-save-sites @never-save-sites)]
                  (js/chrome.storage.local.set
                   (clj->js {STORAGE_KEY updated})))))
       (.then on-done)
@@ -97,7 +114,9 @@
 
 (defn- settings-changed? []
   (or (not= @passkeys-enabled? @saved-passkeys-enabled?)
-      (not= @disabled-sites @saved-disabled-sites)))
+      (not= @disabled-sites @saved-disabled-sites)
+      (not= @save-logins-enabled? @saved-save-logins-enabled?)
+      (not= @never-save-sites @saved-never-save-sites)))
 
 ;; ── UI ────────────────────────────────────────────────────────────────────────
 
@@ -154,7 +173,7 @@
              :checked @new-include-subdomains?
              :on-change #(swap! new-include-subdomains? not)
              :style {:width "14px" :height "14px" :cursor "pointer"
-                     :accent-color "#1976d2"}}]
+                     :accent-color okp-theme/accent}}]
     [:label {:html-for "new-include-subdomains-cb"
              :style {:cursor "pointer" :font-size "13px"
                      :font-family "Roboto, sans-serif"
@@ -174,12 +193,55 @@
                       :sx {:color "text.disabled" :display "block" :mb 1}}
       "No disabled sites"])])
 
+(defn- save-logins-section []
+  [:<>
+   [section-header "Saving logins"]
+
+   [mui-box {:sx {:display "flex" :align-items "center" :gap 1.5 :mb 0.5}}
+    [:input {:type      "checkbox"
+             :id        "save-logins-enabled-cb"
+             :checked   @save-logins-enabled?
+             :disabled  (not @settings-loaded?)
+             :on-change #(swap! save-logins-enabled? not)
+             :style     {:width "16px" :height "16px" :cursor "pointer"
+                         :accent-color okp-theme/accent}}]
+    [:label {:html-for "save-logins-enabled-cb"
+             :style    {:cursor "pointer" :font-size "14px"
+                        :font-family "Roboto, sans-serif"
+                        :user-select "none"}}
+     "Offer to save new and changed logins"]]
+
+   [mui-typography {:variant "caption"
+                    :sx {:color "text.disabled" :display "block" :mb 1 :ml 3.5}}
+    "Asks before saving. Nothing is saved without your confirmation"]
+
+   (when (seq @never-save-sites)
+     [:<>
+      [mui-typography {:variant "caption"
+                       :sx {:color "text.secondary" :display "block" :mb 0.5}}
+       "Never offered on:"]
+      [mui-box {:sx {:mb 1 :max-height 120 :overflow "auto"}}
+       (for [host @never-save-sites]
+         ^{:key host}
+         [mui-box {:sx {:display "flex" :align-items "center"
+                        :justify-content "space-between" :mb 0.5}}
+          [mui-typography {:variant "body2" :sx {:font-size "13px"}} host]
+          [mui-button {:size "small"
+                       :color "inherit"
+                       :sx {:min-width "28px" :font-size "14px" :line-height 1}
+                       :on-click (fn [] (swap! never-save-sites
+                                               (fn [hosts] (vec (remove #(= % host) hosts)))))}
+           "✕"]])]])
+   [mui-box {:sx {:mb 2}}]])
+
 (defn- settings-content []
   (r/create-class
    {:component-did-mount (fn [_] (load-settings!))
     :reagent-render
     (fn []
-      [mui-box {:sx {:p 2 :min-width 360}}
+      [mui-box {:sx (merge (okp-theme/card-sx) {:min-width 360})}
+       [okp-theme/popup-header {:title "Settings"}]
+       [mui-box {:sx {:px 2 :pb 2 :pt 0.5}}
 
        ;; Section: Passkeys
        [section-header "Passkeys"]
@@ -194,7 +256,7 @@
                  :disabled  (not @settings-loaded?)
                  :on-change #(swap! passkeys-enabled? not)
                  :style     {:width "16px" :height "16px" :cursor "pointer"
-                             :accent-color "#1976d2"}}]
+                             :accent-color okp-theme/accent}}]
         [:label {:html-for "passkeys-enabled-cb"
                  :style    {:cursor "pointer" :font-size "14px"
                             :font-family "Roboto, sans-serif"
@@ -204,6 +266,11 @@
        [mui-typography {:variant "caption"
                         :sx {:color "text.disabled" :display "block" :mb 2 :ml 3.5}}
         "Intercept and manage WebAuthn/passkey operations"]
+
+       [mui-divider {:sx {:mb 2}}]
+
+       ;; Section: Saving logins
+       [save-logins-section]
 
        [mui-divider {:sx {:mb 2}}]
 
@@ -225,7 +292,7 @@
                      :on-click (fn []
                                  (save-settings!
                                   (fn [] (iframe-content-messaging/close-settings-popup))))}
-         "Save"]]])}))
+         "Save"]]]])}))
 
 (defn- main-content []
   [settings-content])
@@ -252,4 +319,4 @@
 (defn init []
   (iframe-content-messaging/init-content-connection)
   (init-auto-resize)
-  (rd/render [main-content] (.getElementById ^js/Window js/document "settings_popup")))
+  (rd/render [okp-theme/themed [main-content]] (.getElementById ^js/Window js/document "settings_popup")))

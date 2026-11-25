@@ -51,6 +51,7 @@ When you navigate to a login page, the extension automatically detects username 
    - Entries are grouped by database name if multiple databases are open
    - Each entry shows its title and username
 3. Click the entry you want -- the username and password fields are filled automatically
+   - Or use the keyboard without leaving the field: ↑ / ↓ to choose, Enter to fill, Escape to close the list
 
 ### When No Matches Are Found
 
@@ -61,6 +62,47 @@ If no entry matches the current URL, you will see:
 To pick the credentials for a site, please add the URL to the **URL or Additional URLs** field of a relevant login entry in a keepass database
 
 ![Quick "Disable on this site" control in the extension popup](images/add-url-msg.png)
+
+## Filling 2FA Codes
+
+If an entry has a one-time password (TOTP) set up in OneKeePass, the extension can fill its current code into a site's 2FA page.
+
+1. On the site's code page, click the code field (or the OneKeePass icon in it)
+2. The list shows only this site's entries that have a 2FA code. The entry you just signed in with in this tab is marked **Just used** and listed first
+3. Click the entry: its current code is filled in. Codes split into one box per digit are filled box by box
+
+Only the generated code is sent from the desktop app, never the TOTP secret. Picking an entry for a login field fills the username and password only, never the code.
+
+## Saving New and Changed Logins
+
+When you sign in, sign up or change a password on a site, the extension can offer to save it in your database. Nothing is saved until you confirm.
+
+### How It Works
+
+1. Submit the site's login, sign-up or change-password form as usual
+2. Once the login has gone through (the next page loads, or the form goes away), a **Save this login?** or **Update saved password?** popup appears at the top right
+   - The extension does not offer anything after a failed login (for example a mistyped password), or when the login you used is already saved
+3. Choose what to do:
+   - **Save**: adds a new entry. You can change its title and pick the database and group
+   - **Update**: writes the new password to the existing entry for that username. The old password is kept in the entry's history
+   - **Save as new**: adds a separate entry instead of updating
+   - **Not now**: closes the popup; nothing is saved
+   - **Never for this site**: closes the popup and stops offering on this site
+
+### What Is Never Saved
+
+- Logins on plain `http://` sites (except `localhost`)
+- Logins typed into a login frame from another site embedded in the page
+- Logins in private (incognito) windows
+- Logins on sites where OneKeePass is disabled
+
+Your stored passwords never leave the desktop app: it compares the submitted login with your entries itself and only tells the extension whether it is new, changed or already saved.
+
+### Turning It Off
+
+Open **Settings** from the extension popup and clear **Offer to save new and changed logins**. The sites where you chose **Never for this site** are listed there, and can be removed from the list.
+
+> Saving logins needs a OneKeePass desktop app version that supports it.
 
 ## Using Passkeys (WebAuthn/FIDO2)
 

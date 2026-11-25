@@ -7,8 +7,10 @@
    [applied-science.js-interop :as j]
    [onekeepass.browser.common.message-type-names :refer [CLOSE_ENTRY_LIST_POPUP
                                                          CLOSE_POPUP
+                                                         CLOSE_SAVE_LOGIN_POPUP
                                                          CLOSE_SETTINGS_POPUP
                                                          CUSTOM_ICON_LOADED
+                                                         ENTRY_LIST_KEY
                                                          ENTRY_SELECTED
                                                          GET_CUSTOM_ICON
                                                          MSG_BOX_MESSAGE
@@ -21,10 +23,15 @@
                                                          POPUP_ACTION
                                                          RECONNECT_APP
                                                          REDETECT_FIELDS
+                                                         SAVE_LOGIN_CONFIRMED
+                                                         SAVE_LOGIN_DISMISSED
+                                                         SAVE_LOGIN_NEVER_FOR_SITE
+                                                         SAVE_LOGIN_RESULT
                                                          SHOW_ENTRY_LIST
                                                          SHOW_PASSKEY_CREATE_POPUP
                                                          SHOW_PASSKEY_ENTRIES
                                                          SHOW_PASSKEY_GROUPS
+                                                         SHOW_SAVE_LOGIN_POPUP
                                                          SHOW_SETTINGS_POPUP
                                                          START_ASSOCIATION]]
    [onekeepass.browser.common.utils :as u]
@@ -32,6 +39,13 @@
    [onekeepass.browser.content.inject.db-icons :as db-icons]
    [re-frame.core :refer [dispatch reg-event-fx reg-sub subscribe]]))
 
+
+;; Set by the entry list popup: called with the arrow / Enter keys the content
+;; script forwards from the login field
+(defonce ^:private entry-list-key-handler (atom nil))
+
+(defn set-entry-list-key-handler! [f]
+  (reset! entry-list-key-handler f))
 
 (defn- content-message-handler
   "This is used in iframe to handle the message received from content scripts"
@@ -69,6 +83,16 @@
       PASSKEY_CREATE_SUCCESS
       (dispatch [:iframe-passkey-create/success])
 
+      SHOW_SAVE_LOGIN_POPUP
+      (dispatch [:iframe-save-login/data-received message-data])
+
+      ENTRY_LIST_KEY
+      (when-let [f @entry-list-key-handler]
+        (f (:key message-data)))
+
+      SAVE_LOGIN_RESULT
+      (dispatch [:iframe-save-login/result-received message-data])
+
       ;; Else part
       (u/okp-println "Unknown message from content script received" message-data))))
 
@@ -94,13 +118,15 @@
 
 (defn send-entry-selected
   "A message is sent from iframe to content side whinc in turn handles
-  the ENTRY_SELECTED message as done previously"
-  [db-key entry-uuid]
+  the ENTRY_SELECTED message as done previously.
+  list-kind is the kind of the list this popup shows (password or passkey)"
+  [db-key entry-uuid list-kind]
   ;; This messsage flow is iframe -> content -> background -> content
   (iframe-content-conn/send-message-to-content {:message-type ENTRY_SELECTED
                                                 :db-key db-key
                                                 :entry-uuid entry-uuid
-                                                :selection-id @(subscribe [:iframe-selection-id])}))
+                                                :selection-id @(subscribe [:iframe-selection-id])
+                                                :list-kind list-kind}))
 
 (defn send-get-custom-icon [db-key custom-icon-uuid]
   (u/okp-println "Sending from content to iframe GET_CUSTOM_ICON message")
@@ -128,6 +154,34 @@
   "Called when user chooses 'Use Browser Default' — detaches OKP proxy and rejects current request."
   []
   (iframe-content-conn/send-message-to-content {:message-type PASSKEY_CREATE_FALLBACK}))
+
+(defn send-save-login-confirmed
+  "Called from the save-login popup when the user clicks Save or Update.
+   choice is \"add\" (with db-key, group-uuid, title) or \"update\" (with db-key, entry-uuid)"
+  [{:keys [choice db-key entry-uuid group-uuid title username]}]
+  (iframe-content-conn/send-message-to-content {:message-type SAVE_LOGIN_CONFIRMED
+                                                :choice       choice
+                                                :db-key       db-key
+                                                :entry-uuid   entry-uuid
+                                                :group-uuid   group-uuid
+                                                :title        title
+                                                ;; For a new entry: the username as the user corrected it
+                                                :username     username}))
+
+(defn send-save-login-dismissed
+  "Called from the save-login popup when the user clicks Not now"
+  []
+  (iframe-content-conn/send-message-to-content {:message-type SAVE_LOGIN_DISMISSED}))
+
+(defn send-save-login-never-for-site
+  "Called from the save-login popup when the user clicks Never for this site"
+  []
+  (iframe-content-conn/send-message-to-content {:message-type SAVE_LOGIN_NEVER_FOR_SITE}))
+
+(defn close-save-login-popup
+  "Called from the save-login popup to close itself after showing the result"
+  []
+  (iframe-content-conn/send-message-to-content {:message-type CLOSE_SAVE_LOGIN_POPUP}))
 
 (defn close-settings-popup
   "Called from the settings popup iframe to close itself."
@@ -250,10 +304,14 @@
 
 (reg-event-fx
  :iframe-matched-entries-loaded
- (fn [{:keys [db]} [_event_id {:keys [matched-entries fill-target-origin top-origin selection-id]}]]
+ (fn [{:keys [db]} [_event_id {:keys [matched-entries fill-target-origin top-origin selection-id list-kind
+                                      list-purpose suggested-entry]}]]
    {:db (-> db
             (assoc-in [:iframe :matched-entries] matched-entries)
             (assoc-in [:iframe :selection-id] selection-id)
+            (assoc-in [:iframe :list-kind] list-kind)
+            (assoc-in [:iframe :purpose] list-purpose)
+            (assoc-in [:iframe :suggested-entry] suggested-entry)
             (assoc-in [:iframe :fill-target-origin] fill-target-origin)
             (assoc-in [:iframe :top-origin] top-origin))}))
 
@@ -266,6 +324,36 @@
  :iframe-matched-entries
  (fn [db [_event-id]]
    (-> db (get-in [:iframe :matched-entries]))))
+
+(defn list-kind
+  "The kind (password or passkey) of the list shown in this entry list popup"
+  []
+  (subscribe [:iframe-list-kind]))
+
+(reg-sub
+ :iframe-list-kind
+ (fn [db [_event-id]]
+   (-> db (get-in [:iframe :list-kind]))))
+
+(defn purpose
+  "login, or otp when the list was opened from a one-time code (2FA) field"
+  []
+  (subscribe [:iframe-purpose]))
+
+(reg-sub
+ :iframe-purpose
+ (fn [db [_event-id]]
+   (-> db (get-in [:iframe :purpose]))))
+
+(defn suggested-entry
+  "{:db-key :entry-uuid} of the entry just used to sign in on this tab, if any"
+  []
+  (subscribe [:iframe-suggested-entry]))
+
+(reg-sub
+ :iframe-suggested-entry
+ (fn [db [_event-id]]
+   (-> db (get-in [:iframe :suggested-entry]))))
 
 (defn fill-target-origin []
   (subscribe [:iframe-fill-target-origin]))
@@ -384,3 +472,37 @@
 
 (defn passkey-create-success? []
   (subscribe [:iframe-passkey-create-success]))
+
+;; ── Save-login popup ──────────────────────────────────────────────────────────
+
+(reg-event-fx
+ :iframe-save-login/data-received
+ (fn [{:keys [db]} [_event-id {:keys [save-login-data]}]]
+   {:db (-> db
+            (assoc-in [:iframe :save-login-data] save-login-data)
+            (assoc-in [:iframe :save-login-result] nil))}))
+
+(reg-event-fx
+ :iframe-save-login/result-received
+ (fn [{:keys [db]} [_event-id {:keys [save-login-result]}]]
+   {:db (assoc-in db [:iframe :save-login-result] save-login-result)}))
+
+(reg-sub
+ :iframe-save-login-data
+ (fn [db [_event-id]]
+   (get-in db [:iframe :save-login-data])))
+
+(reg-sub
+ :iframe-save-login-result
+ (fn [db [_event-id]]
+   (get-in db [:iframe :save-login-result])))
+
+(defn save-login-data
+  "Status, site, username and the save choices sent by the background (no password)"
+  []
+  (subscribe [:iframe-save-login-data]))
+
+(defn save-login-result
+  "{:ok :created :error-message} once the background answered a save"
+  []
+  (subscribe [:iframe-save-login-result]))

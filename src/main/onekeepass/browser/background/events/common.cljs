@@ -3,7 +3,8 @@
    [camel-snake-kebab.core :as csk]
    [camel-snake-kebab.extras :as cske]
    [onekeepass.browser.common.frame-security :as frame-security]
-   [onekeepass.browser.common.message-type-names :refer [BACKGROUND_ERROR SELECTED_ENTRY_DETAIL]]
+   [onekeepass.browser.common.message-type-names :refer [BACKGROUND_ERROR SELECTED_ENTRY_DETAIL
+                                                         SELECTED_ENTRY_OTP]]
    [onekeepass.browser.common.utils :as u]
    [re-frame.core :refer [reg-event-fx reg-fx]]))
 
@@ -37,6 +38,17 @@
 (def PASSKEY_CREATED                 "PasskeyCreated")
 (def PASSKEY_LIST                    "PasskeyList")
 (def PASSKEY_ASSERTION_COMPLETE      "PasskeyAssertionComplete")
+
+;; ── Saving a submitted login (extension → desktop) ───────────────────────────
+;; Both requests carry the password, so their payload is encrypted with the
+;; session keys (see crypto/encrypt); only action, request-id and association-id
+;; are sent in the clear.
+(def CHECK_LOGIN_CREDENTIAL "CheckLoginCredential")
+(def SAVE_LOGIN_CREDENTIAL  "SaveLoginCredential")
+
+;; ── Saving a submitted login (desktop → extension) ───────────────────────────
+(def LOGIN_CREDENTIAL_CHECKED "LoginCredentialChecked")
+(def LOGIN_CREDENTIAL_SAVED   "LoginCredentialSaved")
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -216,7 +228,8 @@
  (fn [{:keys [db]} [_event_id message-data request-id use-main-frame-id]]
    #_(u/okp-println "In :common/send-tab-message-for-request-id before db keys " (keys db) (get-in db [:reques-ids request-id]))
    (let [{:keys [tab-id frame-id frame-url document-id]} (get-in db [:reques-ids request-id])
-         credential? (= SELECTED_ENTRY_DETAIL (:message-type message-data))
+         ;; A password and a 2FA code are both secrets: pinned to the frame's origin and document
+         credential? (contains? #{SELECTED_ENTRY_DETAIL SELECTED_ENTRY_OTP} (:message-type message-data))
          expected-origin (when credential? (frame-security/web-origin frame-url))
          ;; Need to ensure that any error message popup should be shown in the main frame
          ;; In some site, the frame id may belong to iframe of the input element (e.g Charles schwab)

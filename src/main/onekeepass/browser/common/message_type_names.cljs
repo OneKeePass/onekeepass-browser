@@ -83,6 +83,43 @@
 
 (def REDETECT_FIELDS "REDETECT_FIELDS")
 
+;; window.postMessage type from a floating popup iframe to its host content script:
+;; drag the popup or close it (see okp-theme/popup-header and popup-host)
+(def POPUP_FRAME_MESSAGE "OKP_POPUP_FRAME")
+
+;; content -> entry list iframe: an arrow / Enter key pressed in the login field the
+;; list is open for, so the list can be used from the keyboard
+(def ENTRY_LIST_KEY "ENTRY_LIST_KEY")
+
+;; Which list an entry-list popup shows. Sent with SHOW_ENTRY_LIST / SHOW_PASSKEY_LIST
+;; and echoed back with ENTRY_SELECTED, so a pick in the password list always fills a
+;; password and a pick in the passkey list always completes the passkey sign-in,
+;; whatever else is pending in the tab.
+(def LIST_KIND_PASSWORD "password")
+(def LIST_KIND_PASSKEY "passkey")
+
+;; What a password-list request is for, sent with GET_ENTRY_LIST and ENTRY_SELECTED:
+;; filling a login (username + password) or a site's 2FA one-time code field
+(def FILL_PURPOSE_LOGIN "login")
+(def FILL_PURPOSE_OTP "otp")
+
+;; bg -> content: the current one-time code of the entry picked for a 2FA field
+(def SELECTED_ENTRY_OTP "SELECTED_ENTRY_OTP")
+
+;; Saving a submitted login — content → background
+(def CREDENTIAL_SUBMITTED "CREDENTIAL_SUBMITTED")                   ;; username + password submitted on the page
+(def CREDENTIAL_USERNAME_SUBMITTED "CREDENTIAL_USERNAME_SUBMITTED") ;; username step of a two-step login
+(def CREDENTIAL_FORM_GONE "CREDENTIAL_FORM_GONE")                   ;; the submitted password field went away (SPA login succeeded)
+
+;; Save-login popup — background → content → iframe, and back
+(def SHOW_SAVE_LOGIN_POPUP "SHOW_SAVE_LOGIN_POPUP")
+(def CLOSE_SAVE_LOGIN_POPUP "CLOSE_SAVE_LOGIN_POPUP")
+(def RESIZE_IFRAME_SAVE_LOGIN "RESIZE_IFRAME_SAVE_LOGIN")
+(def SAVE_LOGIN_CONFIRMED "SAVE_LOGIN_CONFIRMED")         ;; iframe→content→bg: user chose add / update
+(def SAVE_LOGIN_DISMISSED "SAVE_LOGIN_DISMISSED")         ;; iframe→content→bg: user closed the popup
+(def SAVE_LOGIN_NEVER_FOR_SITE "SAVE_LOGIN_NEVER_FOR_SITE") ;; iframe→content→bg: do not offer again on this site
+(def SAVE_LOGIN_RESULT "SAVE_LOGIN_RESULT")               ;; bg→content→iframe: saved, or why not
+
 (def RECONNECT_APP "RECONNECT_APP")
 
 ;; Message types for content <-> iframe communication

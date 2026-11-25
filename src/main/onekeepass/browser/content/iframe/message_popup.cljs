@@ -1,5 +1,6 @@
 (ns onekeepass.browser.content.iframe.message-popup
   (:require
+   [onekeepass.browser.common.okp-theme :as okp-theme]
    [applied-science.js-interop :as j]
    [onekeepass.browser.common.connection-states :refer [APP_CONNECTED
                                                         APP_DISCONNECTED
@@ -210,7 +211,7 @@
                         :checked @include-subdomains?
                         :on-change #(swap! include-subdomains? not)
                         :style {:width "14px" :height "14px" :cursor "pointer"
-                                :accent-color "#1976d2"}}]
+                                :accent-color okp-theme/accent}}]
                [:label {:html-for "disable-include-subdomains-cb"
                         :style {:cursor "pointer" :font-size "13px"
                                 :font-family "Roboto, sans-serif"
@@ -232,16 +233,7 @@
   (let [timer (atom nil)
         site-disabled? (:site-disabled @(iframe-content-messaging/site-disable-info))]
     [mui-box {:sx
-              {:bgcolor "background.paper"
-               ;;:width "400px"
-               :border-color "black"
-               :border-style "solid"
-               :border-width ".5px"
-               ;;:background "background.paper" ;; This creates transparent background 
-               :boxShadow 0
-               :borderRadius 1
-               :margin "5px"
-               :padding "2px 2px 2px 2px"}
+              (okp-theme/card-sx)
 
               :ref (fn [ref]
                      #_(when ref
@@ -277,6 +269,9 @@
                   ;; The min height is required
                   {:minHeight POPUP_ACTION_BOX_HEIGHT}}
 
+      [okp-theme/popup-header {:title "OneKeePass"
+                               :detail (:page-host @(iframe-content-messaging/site-disable-info))}]
+
       ;; Header part
       #_[mui-box {:component "header"
                   :sx {:bgcolor "primary.main"
@@ -308,7 +303,7 @@
 
       ;; Footer part if we need
       ;; Add some action icons ?
-      [mui-box {:component "footer" :sx {:bgcolor m/color-grey-200
+      [mui-box {:component "footer" :sx {:bgcolor "action.hover"
                                          :min-height 35}}
        [m/mui-divider]
        [mui-stack {}
@@ -392,14 +387,14 @@
         ;; setup the size observer when the app mounts
         (init-auto-resize RESIZE_IFRAME_MAIN_POPUP)
         ;; App UI is mounted 
-        (rd/render [popup-main-content] main-popup-mount))
+        (rd/render [okp-theme/themed [popup-main-content]] main-popup-mount))
 
       msg-popup-mount
       (do
         ;; setup the size observer when the app mounts
         (init-auto-resize RESIZE_IFRAME_MSG_POPUP)
         ;; App UI is mounted 
-        (rd/render [msg-popup/msg-box-main-content] msg-popup-mount))
+        (rd/render [okp-theme/themed [msg-popup/msg-box-main-content]] msg-popup-mount))
 
       :else
       (u/okp-console-log "Error: Valid mount point element is not found")))
