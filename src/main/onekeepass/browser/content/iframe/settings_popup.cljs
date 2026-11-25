@@ -3,6 +3,7 @@
    The iframe is an extension page so it can read/write chrome.storage.local directly.
    The background reacts to storage changes via chrome.storage.onChanged."
   (:require
+   [onekeepass.browser.common.okp-theme :as okp-theme]
    [applied-science.js-interop :as j]
    [onekeepass.browser.common.message-type-names :refer [RESIZE_IFRAME_SETTINGS]]
    [onekeepass.browser.common.mui-components
@@ -172,7 +173,7 @@
              :checked @new-include-subdomains?
              :on-change #(swap! new-include-subdomains? not)
              :style {:width "14px" :height "14px" :cursor "pointer"
-                     :accent-color "#1976d2"}}]
+                     :accent-color okp-theme/accent}}]
     [:label {:html-for "new-include-subdomains-cb"
              :style {:cursor "pointer" :font-size "13px"
                      :font-family "Roboto, sans-serif"
@@ -203,7 +204,7 @@
              :disabled  (not @settings-loaded?)
              :on-change #(swap! save-logins-enabled? not)
              :style     {:width "16px" :height "16px" :cursor "pointer"
-                         :accent-color "#1976d2"}}]
+                         :accent-color okp-theme/accent}}]
     [:label {:html-for "save-logins-enabled-cb"
              :style    {:cursor "pointer" :font-size "14px"
                         :font-family "Roboto, sans-serif"
@@ -238,7 +239,7 @@
    {:component-did-mount (fn [_] (load-settings!))
     :reagent-render
     (fn []
-      [mui-box {:sx {:p 2 :min-width 360}}
+      [mui-box {:sx (merge (okp-theme/card-sx) {:p 2 :min-width 360})}
 
        ;; Section: Passkeys
        [section-header "Passkeys"]
@@ -253,7 +254,7 @@
                  :disabled  (not @settings-loaded?)
                  :on-change #(swap! passkeys-enabled? not)
                  :style     {:width "16px" :height "16px" :cursor "pointer"
-                             :accent-color "#1976d2"}}]
+                             :accent-color okp-theme/accent}}]
         [:label {:html-for "passkeys-enabled-cb"
                  :style    {:cursor "pointer" :font-size "14px"
                             :font-family "Roboto, sans-serif"
@@ -316,4 +317,4 @@
 (defn init []
   (iframe-content-messaging/init-content-connection)
   (init-auto-resize)
-  (rd/render [main-content] (.getElementById ^js/Window js/document "settings_popup")))
+  (rd/render [okp-theme/themed [main-content]] (.getElementById ^js/Window js/document "settings_popup")))

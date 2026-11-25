@@ -1,5 +1,6 @@
 (ns onekeepass.browser.content.iframe.msg-popup
   (:require
+   [onekeepass.browser.common.okp-theme :as okp-theme]
    [onekeepass.browser.common.connection-states]
    [onekeepass.browser.content.iframe.events.iframe-content-messaging :as iframe-content-messaging]
    [onekeepass.browser.common.mui-components
@@ -65,15 +66,7 @@
 
     (when (or no-browser-enabled-db no-matching-entries no-matching-passkeys fields-not-filled background-error)
       [mui-box {:sx
-                {:bgcolor  "background.paper"
-                 :border-color "black"
-                 :border-style "solid"
-                 :border-width ".5px"
-                 ;;:background "background.paper" ;; This creates transparent background 
-                 :boxShadow 0
-                 :borderRadius 1
-                 :margin "5px"
-                 :padding "2px 2px 2px 2px"}}
+                (merge (okp-theme/card-sx) {:padding "2px"})}
        [mui-stack  {:sx
                     {:minHeight MESSAGE_BOX_HEIGHT ;; This is required
                      }}
@@ -127,16 +120,7 @@
           ;; background-error @(iframe-content-messaging/background-error)
           ]
       [mui-box {:sx
-                {:bgcolor "background.paper"
-                 ;;:width "400px"
-                 :border-color "black"
-                 :border-style "solid"
-                 :border-width ".5px"
-                 ;;:background "background.paper" ;; This creates transparent background 
-                 :boxShadow 0
-                 :borderRadius 1
-                 :margin "5px"
-                 :padding "2px 2px 2px 2px"}}
+                (merge (okp-theme/card-sx) {:padding "2px"})}
 
        [mui-stack  {:sx
                     {:minHeight MESSAGE_BOX_HEIGHT ;; This is required
@@ -172,15 +156,7 @@
             background-error @(iframe-content-messaging/background-error)]
         ;; (u/okp-println "=== no-browser-enabled-db no-matching-entries background-error" no-browser-enabled-db no-matching-entries background-error)
         [mui-box {:sx
-                  {:bgcolor  "background.paper"
-                   :border-color "black"
-                   :border-style "solid"
-                   :border-width ".5px"
-                   ;;:background "background.paper" ;; This creates transparent background 
-                   :boxShadow 0
-                   :borderRadius 1
-                   :margin "5px"
-                   :padding "2px 2px 2px 2px"}}
+                  (merge (okp-theme/card-sx) {:padding "2px"})}
          [mui-stack  {:sx
                       {:minHeight MESSAGE_BOX_HEIGHT ;; This is required
                        }}
@@ -217,19 +193,11 @@
              [background-error-info background-error])]
 
           ;; Footer part comes here if we need it
-          #_[mui-box {:component "footer" :sx {:bgcolor m/color-grey-200
+          #_[mui-box {:component "footer" :sx {:bgcolor "action.hover"
                                                :min-height 35}}]]]
         #_(when (or no-browser-enabled-db no-matching-entries background-error)
             [mui-box {:sx
-                      {:bgcolor  "background.paper"
-                       :border-color "black"
-                       :border-style "solid"
-                       :border-width ".5px"
-                       ;;:background "background.paper" ;; This creates transparent background 
-                       :boxShadow 0
-                       :borderRadius 1
-                       :margin "5px"
-                       :padding "2px 2px 2px 2px"}}
+                      (merge (okp-theme/card-sx) {:padding "2px"})}
              [mui-stack  {:sx
                           {:minHeight MESSAGE_BOX_HEIGHT ;; This is required
                            }}
@@ -266,5 +234,5 @@
                  [background-error-info background-error])]
 
               ;; Footer part comes here if we need it
-              #_[mui-box {:component "footer" :sx {:bgcolor m/color-grey-200
+              #_[mui-box {:component "footer" :sx {:bgcolor "action.hover"
                                                    :min-height 35}}]]]))))

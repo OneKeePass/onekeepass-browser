@@ -9,6 +9,7 @@
                                                          ENTRY_SELECTED
                                                          GET_CUSTOM_ICON
                                                          GET_ENTRY_LIST
+                                                         FILL_PURPOSE_LOGIN
                                                          IFRAME_POPUP_ACTION_INITIATE
                                                          LIST_KIND_PASSWORD
                                                          NO_BROWSER_ENABLED_DB
@@ -32,6 +33,7 @@
                                                          REDETECT_FIELDS
                                                          SAVE_LOGIN_RESULT
                                                          SELECTED_ENTRY_DETAIL
+                                                         SELECTED_ENTRY_OTP
                                                          SHOW_ENTRY_LIST
                                                          SHOW_PASSKEY_CREATE_POPUP
                                                          SHOW_PASSKEY_ENTRIES
@@ -116,6 +118,13 @@
          (when (and (string? (:expected-fill-origin message-data))
                     (= (:expected-fill-origin message-data) (.-origin js/window.location)))
            (dispatch [:received-seleted-entry-basic-info message-data]))
+
+         ;; The current 2FA code of the entry picked for the page's one-time code field.
+         ;; Pinned to the origin of the frame the list was opened in, as for passwords
+         SELECTED_ENTRY_OTP
+         (when (and (string? (:expected-fill-origin message-data))
+                    (= (:expected-fill-origin message-data) (.-origin js/window.location)))
+           (dispatch [:common/execute-message-handler SELECTED_ENTRY_OTP (:otp message-data)]))
 
          CUSTOM_ICON_LOADED
          (dispatch [:received-custom-icon-loaded message-data])
@@ -229,6 +238,12 @@
   ([user-initiated?]
    (dispatch [:send-get-entry-list user-initiated?])))
 
+(defn set-fill-purpose
+  "Called when a login field (FILL_PURPOSE_LOGIN) or a one-time code field
+   (FILL_PURPOSE_OTP) gets the focus"
+  [purpose]
+  (dispatch [:set-fill-purpose purpose]))
+
 (defn send-entry-selected [db-key entry-uuid]
   ;; Used by the older non-iframe entry list, which shows the password list only
   (dispatch [:send-entry-selected db-key entry-uuid @(subscribe [:selection-id]) LIST_KIND_PASSWORD])
@@ -330,12 +345,23 @@
 
 (reg-event-fx
  :send-get-entry-list
- (fn [{:keys [_db]} [_event-id user-initiated?]]
+ (fn [{:keys [db]} [_event-id user-initiated?]]
    {:fx [[:common/send-bg-message-regfx {:message-type GET_ENTRY_LIST
-                                         :user-initiated (boolean user-initiated?)}]]}))
+                                         :user-initiated (boolean user-initiated?)
+                                         ;; login (username/password field) or otp (2FA code field)
+                                         :purpose (get db :fill-purpose FILL_PURPOSE_LOGIN)}]]}))
+
+;; Set when a login field or a one-time code field gets the focus, so the entry
+;; list request says what it is for
+(reg-event-fx
+ :set-fill-purpose
+ (fn [{:keys [db]} [_event-id purpose]]
+   {:db (assoc db :fill-purpose purpose)}))
 
 ;; Sends a message to the background to get basic entry detail for the selected entry uuid
-;; list-kind tells the background which list the entry was picked from (password or passkey)
+;; list-kind tells the background which list the entry was picked from (password or passkey).
+;; Whether the pick fills a login or a 2FA code field the background knows from the
+;; selection it recorded when the list was asked for
 (reg-event-fx
  :send-entry-selected
  (fn [{:keys [db]} [_event-id db-key entry-uuid selection-id list-kind]]
@@ -449,7 +475,7 @@
 (reg-event-fx
  :matched-entries-loaded
  (fn [{:keys [db]} [_event-id {:keys [message-type matched-entries fixed-position
-                                      fill-target-origin top-origin selection-id]}]]
+                                      fill-target-origin top-origin selection-id purpose suggested-entry]}]]
    ;; matched-entries is a vec of map from vec of struct 'MatchedDbEntries'
    ;; fixed-position is true when the login fields are in a sub-frame and the popup
    ;; is rendered in this (main) frame at a fixed location instead of anchored to an input
@@ -459,6 +485,7 @@
             (assoc-in [:entry-selected-done] false)
             (assoc-in [:matched-entries] matched-entries)
             (assoc :selection-id selection-id)
+            (assoc :list-purpose purpose :suggested-entry suggested-entry)
             (assoc-in [:entry-list-fixed-position] fixed-position)
             (assoc-in [:fill-target-origin] fill-target-origin)
             (assoc-in [:top-origin] top-origin)

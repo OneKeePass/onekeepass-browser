@@ -62,6 +62,16 @@ To pick the credentials for a site, please add the URL to the **URL or Additiona
 
 ![Quick "Disable on this site" control in the extension popup](images/add-url-msg.png)
 
+## Filling 2FA Codes
+
+If an entry has a one-time password (TOTP) set up in OneKeePass, the extension can fill its current code into a site's 2FA page.
+
+1. On the site's code page, click the code field (or the OneKeePass icon in it)
+2. The list shows only this site's entries that have a 2FA code. The entry you just signed in with in this tab is marked **Just used** and listed first
+3. Click the entry: its current code is filled in. Codes split into one box per digit are filled box by box
+
+Only the generated code is sent from the desktop app, never the TOTP secret. Picking an entry for a login field fills the username and password only, never the code.
+
 ## Saving New and Changed Logins
 
 When you sign in, sign up or change a password on a site, the extension can offer to save it in your database. Nothing is saved until you confirm.

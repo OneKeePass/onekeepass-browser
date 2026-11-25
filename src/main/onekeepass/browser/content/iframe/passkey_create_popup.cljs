@@ -7,6 +7,7 @@
    Step 4 (:saving)     — spinner while backend saves
    Step 5 (:success)    — 'Passkey saved!' then auto-close after 1.5 s"
   (:require
+   [onekeepass.browser.common.okp-theme :as okp-theme]
    [onekeepass.browser.common.message-type-names :refer [RESIZE_IFRAME_PASSKEY_CREATE]]
    [onekeepass.browser.common.mui-components
     :refer [mui-box mui-button mui-divider mui-list mui-list-item-button
@@ -31,7 +32,7 @@
 
 (def ^:private item-sx
   {:border-radius 1 :mb 0.5
-   "&.Mui-selected" {:bgcolor "rgba(25,118,210,0.12)"}})
+   "&.Mui-selected" {:bgcolor "action.selected"}})
 
 (defn- cancel-button []
   [mui-button {:variant "outlined" :size "small" :color "inherit"
@@ -46,10 +47,7 @@
            :value       @value-atom
            :on-change   #(reset! value-atom (-> % .-target .-value))
            :auto-focus  true
-           :style       {:width "100%" :box-sizing "border-box"
-                         :padding "6px 8px" :font-size "14px"
-                         :border "1px solid #ccc" :border-radius "4px"
-                         :margin-top "4px"}}])
+           :style       (assoc okp-theme/input-style :margin-top "4px")}])
 
 ;; ── Step 1: DB picker ─────────────────────────────────────────────────────────
 
@@ -93,11 +91,11 @@
                 "Select or create a group:"]]
 
    ;; "+ New Group" block at the top, outside the list
-   [mui-box {:sx       {:border        (if @new-group? "1px solid #1976d2" "1px solid #e0e0e0")
+   [mui-box {:sx       {:border        (if @new-group? "1px solid #2f6fed" "1px solid var(--okp-divider)")
                         :border-radius 1
                         :padding       "6px 12px"
                         :cursor        "pointer"
-                        :bgcolor       (if @new-group? "rgba(25,118,210,0.08)" "transparent")}
+                        :bgcolor       (if @new-group? "action.hover" "transparent")}
              :on-click (fn []
                          (reset! new-group? true)
                          (reset! selected-group-uuid nil))}
@@ -146,11 +144,11 @@
                   "Select or create an entry:"]]
      #_[mui-typography {:variant "body2" :color "text.secondary"} "Select or create an entry:"]
      ;; "+ New Entry" block at the top, outside the list
-     [mui-box {:sx       {:border        (if @new-entry? "1px solid #1976d2" "1px solid #e0e0e0")
+     [mui-box {:sx       {:border        (if @new-entry? "1px solid #2f6fed" "1px solid var(--okp-divider)")
                           :border-radius 1
                           :padding       "6px 12px"
                           :cursor        "pointer"
-                          :bgcolor       (if @new-entry? "rgba(25,118,210,0.08)" "transparent")}
+                          :bgcolor       (if @new-entry? "action.hover" "transparent")}
                :on-click (fn []
                            (reset! new-entry? true)
                            (reset! selected-entry-uuid nil))}
@@ -233,15 +231,7 @@
     (when (and (not= @current-step :success) success?)
       (reset! current-step :success)
       (js/setTimeout #(iframe-content-messaging/send-passkey-create-cancelled) 1500))
-    [mui-box {:sx {:min-height 80
-                   :bgcolor    "background.paper"
-                   :border-color "black"
-                   :border-style "solid"
-                   :border-width ".5px"
-                   :box-shadow 0
-                   :border-radius 1
-                   :margin "5px"
-                   :padding "8px 10px 8px 10px"}}
+    [mui-box {:sx (merge (okp-theme/card-sx) {:min-height 80 :padding "12px 14px"})}
      (case @current-step
        :db-pick        [step-db-pick {:databases databases :rp-name rp-name}]
        :group-pick     [step-group-pick groups]
@@ -272,4 +262,4 @@
 (defn init []
   (iframe-content-messaging/init-content-connection)
   (init-auto-resize)
-  (rd/render [main-content] (.getElementById ^js/Window js/document "app")))
+  (rd/render [okp-theme/themed [main-content]] (.getElementById ^js/Window js/document "app")))

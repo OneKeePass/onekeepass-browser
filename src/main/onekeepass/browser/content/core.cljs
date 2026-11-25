@@ -7,6 +7,7 @@
                                                          POPUP_ACTION
                                                          REDETECT_FIELDS
                                                          SELECTED_ENTRY_DETAIL
+                                                         SELECTED_ENTRY_OTP
                                                          SHOW_SAVE_LOGIN_POPUP
                                                          SHOW_ENTRY_LIST
                                                          SHOW_PASSKEY_CREATE_POPUP
@@ -71,6 +72,8 @@
 
     SHOW_ENTRY_LIST popup-host/create-entry-list-popup
     SELECTED_ENTRY_DETAIL form-fields/fill-inputs
+    ;; The 2FA code for the page's one-time code field (see otp-fields)
+    SELECTED_ENTRY_OTP form-fields/fill-otp
 
     ;; Offer to save a login submitted on this site (see credential-capture)
     SHOW_SAVE_LOGIN_POPUP popup-host/create-save-login-popup})

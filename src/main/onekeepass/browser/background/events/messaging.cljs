@@ -38,6 +38,7 @@
                                                          CREDENTIAL_USERNAME_SUBMITTED
                                                          CUSTOM_ICON_LOADED
                                                          ENTRY_SELECTED
+                                                         FILL_PURPOSE_OTP
                                                          GET_CUSTOM_ICON
                                                          GET_ENTRY_LIST
                                                          LAUNCHING_POPUP
@@ -213,7 +214,7 @@
 
 (reg-event-fx
  :get-entry-list
- (fn [{:keys [db]} [_event-id {:keys [tab-id frame-id tab-url frame-url document-id user-initiated] :as _sender-info}]]
+ (fn [{:keys [db]} [_event-id {:keys [tab-id frame-id tab-url frame-url document-id user-initiated purpose] :as _sender-info}]]
    #_(u/okp-println "get-entry-list form-url " form-url " tab-id " tab-id " frame-id " frame-id)
    (let [request-id (bg-cmn-event/generate-request-id)
          association-id (get db :association-id)
@@ -240,7 +241,9 @@
        ;; for cross-origin sub-frame logins.
        {:db (-> db (assoc-in [:reques-ids request-id] {:tab-id tab-id :frame-id frame-id
                                                        :tab-url tab-url :frame-url frame-url
-                                                       :document-id document-id}))
+                                                       :document-id document-id
+                                                       ;; login, or otp for a 2FA code field
+                                                       :purpose purpose}))
         :fx [[:dispatch [:send-app-request {:action ENABLED_DATABASE_MATCHED_ENTRY_LIST
                                             :request-id request-id
                                             :form-url (form-url-to-match frame-url)} true]]]}))))
@@ -249,17 +252,22 @@
  :load-selected-entry-detail
  (fn [{:keys [db]} [_event-id {:keys [tab-id] :as sender-info}
                    {:keys [db-key entry-uuid] :as entry-info}]]
-   (if-let [target (frame-security/selected-target
-                    (get-in db [:tabs tab-id :autofill-selection]) sender-info entry-info)]
-     (let [request-id (bg-cmn-event/generate-request-id)]
-       {:db (-> db
-                (update-in [:tabs tab-id] dissoc :autofill-selection)
-                (assoc-in [:reques-ids request-id] target))
-        :fx [[:dispatch [:send-app-request {:action SELECTED_ENTRY
-                                           :request-id request-id
-                                           :db-key db-key
-                                           :entry-uuid entry-uuid} true]]]})
-     {})))
+   (let [selection (get-in db [:tabs tab-id :autofill-selection])]
+     (if-let [target (frame-security/selected-target selection sender-info entry-info)]
+       (let [request-id (bg-cmn-event/generate-request-id)]
+         {:db (-> db
+                  (update-in [:tabs tab-id] dissoc :autofill-selection)
+                  ;; The purpose (login or 2FA code) is the one recorded when the
+                  ;; list was asked for, not a claim of the popup
+                  (assoc-in [:reques-ids request-id] (assoc target
+                                                            :purpose (:purpose selection)
+                                                            :db-key db-key
+                                                            :entry-uuid entry-uuid)))
+          :fx [[:dispatch [:send-app-request {:action SELECTED_ENTRY
+                                             :request-id request-id
+                                             :db-key db-key
+                                             :entry-uuid entry-uuid} true]]]})
+       {}))))
 
 (reg-event-fx
  :get-custom-icon
@@ -760,7 +768,9 @@
          ;; Background gets this message from content script to get the all entries of all opened databases
          ;; that match the tab url from the main app
          GET_ENTRY_LIST
-         (dispatch [:get-entry-list (assoc sender-info :user-initiated (boolean (:user-initiated message-data)))])
+         (dispatch [:get-entry-list (assoc sender-info
+                                           :user-initiated (boolean (:user-initiated message-data))
+                                           :purpose (:purpose message-data))])
 
          GET_CUSTOM_ICON
          (dispatch [:get-custom-icon sender-info (select-keys message-data [:db-key :custom-icon-uuid])])

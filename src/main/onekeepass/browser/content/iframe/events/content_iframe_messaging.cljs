@@ -259,7 +259,8 @@
    (let [message-data (if (= list-kind LIST_KIND_PASSKEY)
                         ;; No selection-id: that binds a password-list pick to its frame
                         {:matched-entries (get db :passkey-matched-entries)}
-                        (select-keys db [:matched-entries :fill-target-origin :top-origin :selection-id]))
+                        (select-keys db [:matched-entries :fill-target-origin :top-origin :selection-id
+                                         :list-purpose :suggested-entry]))
          message-data (merge {:message-type SHOW_ENTRY_LIST
                               :list-kind (if (= list-kind LIST_KIND_PASSKEY) LIST_KIND_PASSKEY LIST_KIND_PASSWORD)}
                              message-data)]

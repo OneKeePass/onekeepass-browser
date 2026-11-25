@@ -108,19 +108,24 @@
 (defn- create-close-button [on-close-fn]
   (let [btn (js/document.createElement "span")]
     (set! (.-innerText btn) "×")
+    (j/assoc! btn :title "Close")
     (set! (.-cssText (.-style btn))
           (str "cursor: pointer;"
-               "float: right;"
-               "font-weight: bold;"
+               "position: absolute;"
+               "right: 6px;"
+               "top: 5px;"
+               "width: 24px;"
+               "height: 24px;"
+               "border-radius: 6px;"
+               "text-align: center;"
                "font-size: 18px;"
-               "color: #ccc;"
-               "margin-right: 10px;"
-               "line-height: 30px;" ;; Match handle height
+               "line-height: 23px;"
+               "color: rgba(255,255,255,0.85);"
                "user-select: none;"))
 
     ;; Add hover effect for better UX
-    (.addEventListener btn "mouseover" #(set! (.-color (.-style btn)) "#fff"))
-    (.addEventListener btn "mouseout"  #(set! (.-color (.-style btn)) "#ccc"))
+    (.addEventListener btn "mouseover" #(set! (.-background (.-style btn)) "rgba(255,255,255,0.18)"))
+    (.addEventListener btn "mouseout"  #(set! (.-background (.-style btn)) "transparent"))
 
     ;; The Click Handler
     (.addEventListener btn "click"
@@ -174,42 +179,54 @@
   (let [iframe (js/document.createElement "iframe")]
     (j/assoc! iframe :src (str src "#okp-channel=" (frame-security/new-popup-channel-token)))
     (j/assoc! iframe :scrolling "no")
+    ;; Transparent: the popup page draws its own rounded card with a shadow
+    ;; (see okp-theme/card-sx)
     (j/assoc-in! iframe
                  [:style :cssText]
                  (str
                   "width: " width  "px;"
                   (when height (str "height:" height "px;"))
+                  "display: block;"
                   "overflow: hidden;"
                   "border: none;"
-                  "background: white;"
-                  "border-bottom-left-radius: 8px;"
-                  "border-bottom-right-radius: 8px;"
-                  "box-shadow: 0 4px 15px rgba(0,0,0,0.2);"))
+                  "background: transparent;"))
     iframe))
+
+;; The card inside a popup iframe is inset by this much on each side (the room
+;; its shadow needs); the drag handle above it is inset the same way
+(def ^:private CARD_INSET 6)
+
+(defn- iframe-src-with-handle
+  "Tells the popup page it is shown under a drag handle, so its card joins it"
+  [src dragging-support]
+  (if dragging-support (str src "?handle=1") src))
 
 (defn- create-drag-handle []
   (let [handle (js/document.createElement "div")]
 
     (j/assoc! handle :innerText "OneKeePass")
 
-    ;; Using style 'text-align:center;' ensures that the title is in the center
-    ;; The style 'background' is same as the mui primary main color
+    ;; A slim title bar joined to the popup card below it (same inset and corner
+    ;; radius). The color is okp-theme/accent
     (j/assoc-in! handle [:style :cssText]
                  (str
-                  "text-align:center;"
-                  "width: " POPUP_ACTION_BOX_WIDTH  "px;"
-                  "height: 30px;"
-                  "background: #1976d2;"
-                  ;;"background: #333;"
+                  "position: relative;"
+                  "margin: 6px " CARD_INSET "px 0 " CARD_INSET "px;"
+                  "width: " (- POPUP_ACTION_BOX_WIDTH (* 2 CARD_INSET)) "px;"
+                  "height: 34px;"
+                  "background: #2f6fed;"
                   "color: #fff;"
-                  "font-family: sans-serif;"
-                  "font-size: 12px;"
-                  "line-height: 30px;"
-                  "padding-left: 10px;"
+                  "font-family: Roboto, system-ui, -apple-system, 'Segoe UI', sans-serif;"
+                  "font-size: 13px;"
+                  "font-weight: 600;"
+                  "letter-spacing: 0.01em;"
+                  "line-height: 34px;"
+                  "padding-left: 14px;"
                   "box-sizing: border-box;"
                   "cursor: move;"
-                  "border-top-left-radius: 8px;"
-                  "border-top-right-radius: 8px;"
+                  "border-top-left-radius: 12px;"
+                  "border-top-right-radius: 12px;"
+                  "box-shadow: 0 -2px 10px rgba(15,23,42,0.10);"
                   "user-select: none;")) ;; Prevent text highlighting while dragging
     ;; This also works showing title
     #_(let [txt-el (js/document.createElement "span")]
@@ -219,7 +236,7 @@
     handle))
 
 (defn- create-popup-internal [{:keys [iframe-src tag-name box-width box-height close-popup dragging-support ]}]
-  (let [iframe-src (js/chrome.runtime.getURL iframe-src)
+  (let [iframe-src (iframe-src-with-handle (js/chrome.runtime.getURL iframe-src) dragging-support)
         ;; Here 'right' value is the px that determines the x coordinate of the popup from right
         ;; Looks like this is diffrent from viewport right as per the diagram in the pagehttps://developer.mozilla.org/en-US/docs/Web/API/Element/getBoundingClientRect
         ;; Is it so?.
@@ -305,9 +322,9 @@
     #_(set! (.-height (.-style iframe-el)) (str h "px"))
     (set! (.-height (.-style iframe-element)) (str total-h "px"))
 
-    ;; Update Drag Handle width to match
+    ;; Update Drag Handle width to match the card (inset on both sides)
     (when handle-element
-      (set! (.-width (.-style handle-element)) (str total-w "px")))))
+      (set! (.-width (.-style handle-element)) (str (- total-w (* 2 CARD_INSET)) "px")))))
 
 (defn- iframe-resize-message-listener
   "Adds a resize listener to receive resize data from ResizeObserver of iframe content. 
@@ -425,7 +442,7 @@
 ;;;;;;;;;;;
 
 (defn- create-entry-list-popup-internal [{:keys [iframe-src tag-name host-left host-top width dragging-support close-popup]}]
-  (let [iframe-src (js/chrome.runtime.getURL iframe-src)
+  (let [iframe-src (iframe-src-with-handle (js/chrome.runtime.getURL iframe-src) dragging-support)
         ;; Here 'right' value is the px that determines the x coordinate of the popup from right
         ;; Looks like this is diffrent from viewport right as per the diagram in the pagehttps://developer.mozilla.org/en-US/docs/Web/API/Element/getBoundingClientRect
         ;; Is it so?.
@@ -521,7 +538,8 @@
   (let [focused-input (common-ui/deep-active-element)]
     #_(u/okp-console-log "Focused input in 'create-entry-list-popup-anchored' is " focused-input)
     (when (or (= focused-input (context/username-in-page))
-              (= focused-input (context/password-in-page)))
+              (= focused-input (context/password-in-page))
+              (context/otp-input-in-page? focused-input))
       ;; Close any existing entry list popup first so moving from one login field to
       ;; another (e.g username -> password) shows a single popup, not one under each.
       ;; (The fixed/passkey paths already do this; the anchored path relied on the racy

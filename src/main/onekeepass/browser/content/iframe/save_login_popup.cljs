@@ -11,6 +11,7 @@
    back only the user's choice. The background holds the captured login and
    checks the choice against what the app offered."
   (:require
+   [onekeepass.browser.common.okp-theme :as okp-theme]
    [applied-science.js-interop :as j]
    [clojure.string :as str]
    [onekeepass.browser.common.message-type-names :refer [RESIZE_IFRAME_SAVE_LOGIN]]
@@ -62,10 +63,7 @@
     (when (nil? @title)
       (reset! title (or host "")))))
 
-(def ^:private select-style
-  {:width "100%" :box-sizing "border-box" :padding "5px 6px" :font-size "13px"
-   :border "1px solid #ccc" :border-radius "4px" :font-family "Roboto, sans-serif"
-   :background "white"})
+(def ^:private select-style okp-theme/input-style)
 
 (defn- field-label [text]
   [mui-typography {:variant "caption" :sx {:color "text.secondary" :display "block" :mt 1}}
@@ -84,11 +82,12 @@
       (str "Username: " username)])])
 
 (defn- footer-secondary-actions []
-  [mui-stack {:direction "row" :spacing 1 :justify-content "space-between" :sx {:mt 1.5}}
-   [mui-button {:size "small" :color "inherit"
+  [mui-stack {:direction "row" :spacing 1 :justify-content "space-between"
+              :sx {:mt 1 :mx -1 :mb -0.5}}
+   [mui-button {:size "small" :sx {:color "text.secondary" :font-weight 500}
                 :on-click (on-trusted-click iframe-content-messaging/send-save-login-never-for-site)}
     "Never for this site"]
-   [mui-button {:size "small" :variant "outlined" :color "inherit"
+   [mui-button {:size "small" :sx {:color "text.secondary" :font-weight 500}
                 :on-click (on-trusted-click iframe-content-messaging/send-save-login-dismissed)}
     "Not now"]])
 
@@ -110,7 +109,7 @@
         {:selected (= @selected-candidate {:db-key db-key :entry-uuid entry-uuid})
          :on-click #(reset! selected-candidate {:db-key db-key :entry-uuid entry-uuid})
          :sx {:border-radius 1 :mb 0.5
-              "&.Mui-selected" {:bgcolor "rgba(25,118,210,0.12)"}}}
+              "&.Mui-selected" {:bgcolor "action.selected"}}}
         [mui-list-item-text {:primary (if (str/blank? title) "(no title)" title)
                              :secondary (str/join " · " (remove str/blank? [username db-name]))}]]))]
    [mui-typography {:variant "caption" :color "text.secondary"}
@@ -210,14 +209,7 @@
 (defn- main-content []
   (let [{:keys [status] :as data} @(iframe-content-messaging/save-login-data)
         result @(iframe-content-messaging/save-login-result)]
-    [mui-box {:sx {:min-height 80
-                   :bgcolor "background.paper"
-                   :border-color "black"
-                   :border-style "solid"
-                   :border-width ".5px"
-                   :border-radius 1
-                   :margin "5px"
-                   :padding "8px 10px 8px 10px"}}
+    [mui-box {:sx (merge (okp-theme/card-sx) {:min-height 80 :padding "12px 14px"})}
      (cond
        (nil? data) [mui-typography {:variant "body2" :color "text.secondary"} "Loading…"]
        (some? result) [result-view result]
@@ -247,4 +239,4 @@
 (defn init []
   (iframe-content-messaging/init-content-connection)
   (init-auto-resize)
-  (rd/render [main-content] (.getElementById ^js/Window js/document "app")))
+  (rd/render [okp-theme/themed [main-content]] (.getElementById ^js/Window js/document "app")))

@@ -2,6 +2,7 @@
   (:require
    [applied-science.js-interop :as j]
    [clojure.string :as str]
+   [onekeepass.browser.common.message-type-names :refer [FILL_PURPOSE_LOGIN]]
    [onekeepass.browser.common.utils :as u]
    [onekeepass.browser.content.common-ui :as common-ui]
    [onekeepass.browser.content.context :refer [get-password-input
@@ -248,6 +249,9 @@
   [input]
   (when-not @suppress-listeners?
     (show-input-okp-icon input)
+
+    ;; The entry list asked for from this field fills a login
+    (messaging-event/set-fill-purpose FILL_PURPOSE_LOGIN)
 
     ;; Keep a flag so that we do not repeat click and focus events
     (swap! input-focus-info assoc input true)

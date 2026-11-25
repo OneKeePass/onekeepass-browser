@@ -108,3 +108,16 @@ On failure, reply with the usual error shape and the same `action` name as the
 request (`CheckLoginCredential` / `SaveLoginCredential`), with `request_id` when
 possible. The extension shows the error message in the popup for a failed save and
 drops the captured login.
+
+## 2FA codes (no new action)
+
+Filling 2FA codes uses the existing actions. With the matching onekeepass-core, the
+structs the app already returns carry two new fields:
+
+- `EnabledDatabaseMatchedEntryList`: each `MatchedDbEntries` has `otp_entry_uuids`,
+  the matched entries that have a usable TOTP.
+- `SelectedEntry`: `BasicEntryCredentialInfo` has `otp` (`token`, `ttl`, `period`)
+  when the entry has a usable TOTP. The TOTP secret is never included.
+
+If the app serializes these core structs as they are, nothing else is needed. The
+extension sends the code only into a 2FA code field and strips it from login fills.

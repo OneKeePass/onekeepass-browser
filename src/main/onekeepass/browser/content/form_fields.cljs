@@ -9,6 +9,7 @@
                                                                is-possible-username-input]]
    [onekeepass.browser.content.constants :refer [LOGIN_PAGE NOT_LOGIN_PAGE
                                                  PASSWORD]]
+   [onekeepass.browser.content.otp-fields :as otp-fields]
    [onekeepass.browser.content.context :as context :refer [get-input-field-info
                                                            get-password-input
                                                            get-username-input]]
@@ -282,7 +283,9 @@
     ;; No password input and there is a possibility that this may be a login page with just username field only
     ;; Or any other application page which we need not consider at all
     (= (count password-inputs) 0)
-    (let [filtered-text-input-fields (filter-visibile-text-email-inputs all-relevant-inputs)
+    (let [;; A one-time code (2FA) box is not a username field (see otp-fields)
+          filtered-text-input-fields (remove otp-fields/otp-like-input?
+                                             (filter-visibile-text-email-inputs all-relevant-inputs))
           {:keys [container-page-type username-input _message]} (username-only-page filtered-text-input-fields)]
 
       #_(when-not (nil? _message)
@@ -364,6 +367,8 @@
     (let [root (or root js/document)
         all-inputs  (get-all-input-elements root)
         all-relevant-inputs (filter-relevant-inputs all-inputs)]
+    ;; A 2FA code page usually has no login field at all, so this runs first
+    (otp-fields/identify-otp-fields all-inputs)
     (when-not (empty? all-relevant-inputs)
       (let [;; Here we are assuming a page that has one or more password inputs may be a login page
             ;; So we extract the passwo
@@ -586,6 +591,33 @@
     ;; user understands why only part (or none) of the credential was filled.
     (when @skipped?
       (messaging-event/show-fields-not-filled-message))))
+
+;; Callback fn called when the content script receives the current 2FA code of the
+;; entry picked in the list opened from the page's one-time code field. The arg is
+;; {:token :ttl :period}. A code split into one box per digit is filled box by box.
+;; The same fill-time safety gate as for logins applies to every box.
+(defn fill-otp [{:keys [token] :as _otp}]
+  (let [inputs (context/otp-inputs-in-page)
+        token (str token)]
+    (when (and (seq inputs) (seq token))
+      (input-field-okp-icon/set-suppress-listeners! true)
+      (let [skipped? (atom false)]
+        (try
+          (if (= 1 (count inputs))
+            (let [input (first inputs)]
+              (if (safe-to-fill? input)
+                (fill-one-input! input token)
+                (reset! skipped? true)))
+            ;; One digit per box. A shorter code leaves the remaining boxes as they are
+            (doseq [[input ch] (map vector inputs token)]
+              (if (safe-to-fill? input)
+                (fill-one-input! input (str ch))
+                (reset! skipped? true))))
+          (finally
+            (input-field-okp-icon/set-suppress-listeners! false)))
+        (messaging-event/hide-entry-list)
+        (when @skipped?
+          (messaging-event/show-fields-not-filled-message))))))
 
 ;; Few sites have relevant inputs inside shadowdoms
 ;; e.g hbomax, troweprice etc. The following ensures that we get them also

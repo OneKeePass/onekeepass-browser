@@ -35,3 +35,18 @@
 
 (defn is-already-found? [other-page-info]
   (= other-page-info (@page-data :identified-page-info)))
+
+;; The one-time code (2FA) field of the page: a vec with one input, or the inputs of
+;; a code split into one box per digit (see otp-fields)
+(defonce ^:private otp-data (atom {:inputs []}))
+
+(defn store-otp-inputs [inputs]
+  (swap! otp-data assoc :inputs (vec inputs)))
+
+(defn otp-inputs-in-page []
+  (:inputs @otp-data))
+
+(defn otp-input-in-page?
+  "True when the element is one of the page's one-time code inputs"
+  [el]
+  (boolean (and el (some #(identical? % el) (otp-inputs-in-page)))))

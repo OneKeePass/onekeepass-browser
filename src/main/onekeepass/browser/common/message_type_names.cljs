@@ -90,6 +90,14 @@
 (def LIST_KIND_PASSWORD "password")
 (def LIST_KIND_PASSKEY "passkey")
 
+;; What a password-list request is for, sent with GET_ENTRY_LIST and ENTRY_SELECTED:
+;; filling a login (username + password) or a site's 2FA one-time code field
+(def FILL_PURPOSE_LOGIN "login")
+(def FILL_PURPOSE_OTP "otp")
+
+;; bg -> content: the current one-time code of the entry picked for a 2FA field
+(def SELECTED_ENTRY_OTP "SELECTED_ENTRY_OTP")
+
 ;; Saving a submitted login — content → background
 (def CREDENTIAL_SUBMITTED "CREDENTIAL_SUBMITTED")                   ;; username + password submitted on the page
 (def CREDENTIAL_USERNAME_SUBMITTED "CREDENTIAL_USERNAME_SUBMITTED") ;; username step of a two-step login

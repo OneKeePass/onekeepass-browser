@@ -290,11 +290,14 @@
 
 (reg-event-fx
  :iframe-matched-entries-loaded
- (fn [{:keys [db]} [_event_id {:keys [matched-entries fill-target-origin top-origin selection-id list-kind]}]]
+ (fn [{:keys [db]} [_event_id {:keys [matched-entries fill-target-origin top-origin selection-id list-kind
+                                      list-purpose suggested-entry]}]]
    {:db (-> db
             (assoc-in [:iframe :matched-entries] matched-entries)
             (assoc-in [:iframe :selection-id] selection-id)
             (assoc-in [:iframe :list-kind] list-kind)
+            (assoc-in [:iframe :purpose] list-purpose)
+            (assoc-in [:iframe :suggested-entry] suggested-entry)
             (assoc-in [:iframe :fill-target-origin] fill-target-origin)
             (assoc-in [:iframe :top-origin] top-origin))}))
 
@@ -317,6 +320,26 @@
  :iframe-list-kind
  (fn [db [_event-id]]
    (-> db (get-in [:iframe :list-kind]))))
+
+(defn purpose
+  "login, or otp when the list was opened from a one-time code (2FA) field"
+  []
+  (subscribe [:iframe-purpose]))
+
+(reg-sub
+ :iframe-purpose
+ (fn [db [_event-id]]
+   (-> db (get-in [:iframe :purpose]))))
+
+(defn suggested-entry
+  "{:db-key :entry-uuid} of the entry just used to sign in on this tab, if any"
+  []
+  (subscribe [:iframe-suggested-entry]))
+
+(reg-sub
+ :iframe-suggested-entry
+ (fn [db [_event-id]]
+   (-> db (get-in [:iframe :suggested-entry]))))
 
 (defn fill-target-origin []
   (subscribe [:iframe-fill-target-origin]))

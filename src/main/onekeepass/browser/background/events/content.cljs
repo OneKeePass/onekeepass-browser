@@ -3,11 +3,14 @@
   (:require
    [onekeepass.browser.background.events.common :as cmn-event]
    [onekeepass.browser.common.frame-security :as frame-security]
-   [onekeepass.browser.common.message-type-names :refer [CONTENT_FRAME_ID
+   [onekeepass.browser.common.message-type-names :refer [BACKGROUND_ERROR
+                                                         CONTENT_FRAME_ID
+                                                         FILL_PURPOSE_OTP
                                                          LIST_KIND_PASSWORD
                                                          NO_BROWSER_ENABLED_DB
                                                          NO_MATCHING_ENTRIES
                                                          SELECTED_ENTRY_DETAIL
+                                                         SELECTED_ENTRY_OTP
                                                          SHOW_ENTRY_LIST]]
    #_[onekeepass.browser.common.utils :as u]
    [re-frame.core :refer [reg-event-fx]]))
@@ -41,6 +44,15 @@
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;; How long the entry just used to sign in on a tab is suggested first for that
+;; tab's 2FA code field
+(def ^:private SUGGEST_FOR_OTP_MS (* 5 60 1000))
+
+(defn- suggested-otp-entry [db tab-id]
+  (let [{:keys [at] :as last-filled} (get-in db [:tabs tab-id :last-filled])]
+    (when (and at (< (- (.now js/Date) at) SUGGEST_FOR_OTP_MS))
+      (select-keys last-filled [:db-key :entry-uuid]))))
 
 (reg-event-fx
  :content/entry-list-loaded
@@ -89,19 +101,41 @@
         :fx [[:dispatch [:common/send-tab-message-for-request-id
                          {:message-type SHOW_ENTRY_LIST
                           :list-kind LIST_KIND_PASSWORD
+                          :purpose (:purpose req)
+                          :suggested-entry (when (= (:purpose req) FILL_PURPOSE_OTP)
+                                             (suggested-otp-entry db (:tab-id req)))
                           :matched-entries matched-entries
                           :selection-id request-id
                           :fixed-position in-sub-frame?
                           :fill-target-origin fill-target-origin
                           :top-origin top-origin} request-id in-sub-frame?]]]}))))
 
+;; The app returned the picked entry's username, password and, when it has one,
+;; its current 2FA code. Each kind of field gets only what it fills:
+;; - pick from a 2FA code field: only the code (SELECTED_ENTRY_OTP)
+;; - pick from a login field: username and password, never the code
 (reg-event-fx
  :content/basic-entry-info-loaded
- (fn [{:keys [_db]} [_event_id {:keys [message-content request-id]}]]
-
-   {:fx [[:dispatch [:common/send-tab-message-for-request-id
-                     {:message-type SELECTED_ENTRY_DETAIL
-                      :basic-entry-info message-content} request-id]]]}))
+ (fn [{:keys [db]} [_event_id {:keys [message-content request-id]}]]
+   (let [{:keys [purpose tab-id db-key entry-uuid]} (get-in db [:reques-ids request-id])
+         otp (:otp message-content)
+         has-otp? (seq (str (:token otp)))]
+     (if (= purpose FILL_PURPOSE_OTP)
+       {:fx [[:dispatch [:common/send-tab-message-for-request-id
+                         (if has-otp?
+                           {:message-type SELECTED_ENTRY_OTP :otp otp}
+                           {:message-type BACKGROUND_ERROR
+                            :message "No 2FA code for this entry. The entry may have no one-time password, or the OneKeePass app may need an update"})
+                         request-id (not has-otp?)]]]}
+       ;; Remembered so the tab's next 2FA code field suggests this entry first
+       {:db (cond-> db
+              (and tab-id has-otp?)
+              (assoc-in [:tabs tab-id :last-filled] {:db-key db-key
+                                                     :entry-uuid entry-uuid
+                                                     :at (.now js/Date)}))
+        :fx [[:dispatch [:common/send-tab-message-for-request-id
+                         {:message-type SELECTED_ENTRY_DETAIL
+                          :basic-entry-info (dissoc message-content :otp)} request-id]]]}))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -139,7 +173,10 @@
                                                   (= frame-id (:frame-id target))))))
                             requests)))]
      {:db (if (zero? frame-id)
-            (assoc-in db [:tabs tab-id] {:tab-url url :login-field-frame nil})
+            ;; Keeps the tab's :last-filled (the entry just used to sign in) for
+            ;; the next page's 2FA code field
+            (assoc-in db [:tabs tab-id] (merge (select-keys (get-in db [:tabs tab-id]) [:last-filled])
+                                               {:tab-url url :login-field-frame nil}))
             db)})))
 
 #_(reg-event-fx

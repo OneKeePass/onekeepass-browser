@@ -12,6 +12,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Save new and changed logins.** After you sign in, sign up or change a password on a site, the extension offers to add the login to your database or update the saved password. It asks only once the login has gone through, never after a failed login or for a login that is already saved. Updates keep the old password in the entry's history. Can be turned off in **Settings**, or per site with **Never for this site**. Needs a desktop app version that supports it.
 
+- **Fill 2FA codes.** On a site's one-time code page (including codes split into one box per digit), click the code field: the list shows only the site's entries that have a 2FA code, with the entry you just signed in with first. Picking one fills its current code. Only the generated code leaves the desktop app, never the TOTP secret. Needs a desktop app built with the matching onekeepass-core.
+
+### Changed
+
+- **Redesigned popups.** The entry list, save-login, passkey, message and settings popups share a new look: rounded cards, a cleaner entry list with site name, search for long lists and 2FA / passkey badges, and a dark variant that follows the system color scheme.
+
 ### Fixed
 
 - **Passkeys and passwords are no longer mixed up.** The password fill list no longer shows entries that hold only a passkey, and picking an entry from the password list always fills the password, even while a site is also asking for a passkey in the background.
