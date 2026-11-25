@@ -38,6 +38,17 @@
 (def PASSKEY_LIST                    "PasskeyList")
 (def PASSKEY_ASSERTION_COMPLETE      "PasskeyAssertionComplete")
 
+;; ── Saving a submitted login (extension → desktop) ───────────────────────────
+;; Both requests carry the password, so their payload is encrypted with the
+;; session keys (see crypto/encrypt); only action, request-id and association-id
+;; are sent in the clear.
+(def CHECK_LOGIN_CREDENTIAL "CheckLoginCredential")
+(def SAVE_LOGIN_CREDENTIAL  "SaveLoginCredential")
+
+;; ── Saving a submitted login (desktop → extension) ───────────────────────────
+(def LOGIN_CREDENTIAL_CHECKED "LoginCredentialChecked")
+(def LOGIN_CREDENTIAL_SAVED   "LoginCredentialSaved")
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 

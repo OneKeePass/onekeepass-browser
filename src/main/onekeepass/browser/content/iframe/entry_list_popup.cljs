@@ -54,6 +54,9 @@
 ;; https://mui.com/material-ui/react-list/#sticky-subheader
 (defn- dbs-entry-list-content []
   (let [matched-entries @(iframe-content-messaging/matched-entries)
+        ;; Echoed back with the selection so the background routes it to the
+        ;; flow of this list (password fill or passkey sign-in)
+        list-kind @(iframe-content-messaging/list-kind)
         ;; At least we should have one db with non empty 'entry-summaries' as this is taken care in background
         non-empty-matched-entries (filter (fn [{:keys [entry-summaries]}] (not-empty entry-summaries)) matched-entries)]
     [mui-list {:sx {:width "100%"
@@ -77,7 +80,7 @@
                                                          :value uuid
                                                          :on-click (fn [e]
                                                                      (when (trusted-event? e)
-                                                                       (iframe-content-messaging/send-entry-selected db-key uuid)
+                                                                       (iframe-content-messaging/send-entry-selected db-key uuid list-kind)
                                                                        (delayed-close-popup)))
                                                          ;; :selected (if (= @selected-id history-index) true false)
                                                          ;; :secondaryAction (when (= @selected-id (:uuid item)) (r/as-element [mui-icon-button {:edge "end"} [mui-icon-more-vert]]))

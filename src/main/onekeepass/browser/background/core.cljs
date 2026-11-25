@@ -4,6 +4,7 @@
    [re-frame.core :refer [dispatch]]
    [onekeepass.browser.background.events.messaging :as messaging-event]
    [onekeepass.browser.background.events.content]
+   [onekeepass.browser.background.events.credential-save]
    [onekeepass.browser.background.events.passkey]
    [onekeepass.browser.background.events.settings]
    [onekeepass.browser.background.passkey :as passkey]
@@ -90,7 +91,9 @@
                      settings (if raw (js->clj raw :keywordize-keys true) {})
                      enabled? (get settings :passkeys-enabled true)]
                  (dispatch [:settings/loaded {:passkeys-enabled enabled?
-                                              :disabled-sites (get settings :disabled-sites [])}])
+                                              :disabled-sites (get settings :disabled-sites [])
+                                              :save-logins-enabled (get settings :save-logins-enabled true)
+                                              :never-save-sites (get settings :never-save-sites [])}])
                  (when enabled?
                    (setup-passkey-proxy))))))
 
@@ -104,4 +107,7 @@
                             settings (if new-val (js->clj new-val :keywordize-keys true) {})
                             enabled? (get settings :passkeys-enabled true)]
                         (dispatch [:settings/passkeys-enabled-changed enabled?])
-                        (dispatch [:settings/disabled-sites-changed (get settings :disabled-sites [])])))))))
+                        (dispatch [:settings/disabled-sites-changed (get settings :disabled-sites [])])
+                        (dispatch [:settings/save-logins-changed
+                                   {:save-logins-enabled (get settings :save-logins-enabled true)
+                                    :never-save-sites (get settings :never-save-sites [])}])))))))

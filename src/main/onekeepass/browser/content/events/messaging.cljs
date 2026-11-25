@@ -10,6 +10,7 @@
                                                          GET_CUSTOM_ICON
                                                          GET_ENTRY_LIST
                                                          IFRAME_POPUP_ACTION_INITIATE
+                                                         LIST_KIND_PASSWORD
                                                          NO_BROWSER_ENABLED_DB
                                                          NO_MATCHING_ENTRIES
                                                          NO_MATCHING_PASSKEYS
@@ -29,12 +30,14 @@
                                                          POPUP_ACTION
                                                          RECONNECT_APP
                                                          REDETECT_FIELDS
+                                                         SAVE_LOGIN_RESULT
                                                          SELECTED_ENTRY_DETAIL
                                                          SHOW_ENTRY_LIST
                                                          SHOW_PASSKEY_CREATE_POPUP
                                                          SHOW_PASSKEY_ENTRIES
                                                          SHOW_PASSKEY_GROUPS
                                                          SHOW_PASSKEY_LIST
+                                                         SHOW_SAVE_LOGIN_POPUP
                                                          START_ASSOCIATION]]
    [onekeepass.browser.common.utils :as u :refer [okp-println]]
    [onekeepass.browser.content.events.common :as cmn-event]
@@ -91,6 +94,14 @@
          ;; Background notifies that passkey was saved successfully
          PASSKEY_CREATE_SUCCESS
          (dispatch [:received-passkey-create-success])
+
+         ;; Background offers to save a login submitted in this tab
+         SHOW_SAVE_LOGIN_POPUP
+         (dispatch [:received-save-login-data message-data])
+
+         ;; Background tells how saving the login went
+         SAVE_LOGIN_RESULT
+         (dispatch [:received-save-login-result message-data])
 
          NO_BROWSER_ENABLED_DB
          (dispatch [:received-no-browser-enabled-db message-data])
@@ -219,7 +230,8 @@
    (dispatch [:send-get-entry-list user-initiated?])))
 
 (defn send-entry-selected [db-key entry-uuid]
-  (dispatch [:send-entry-selected db-key entry-uuid @(subscribe [:selection-id])])
+  ;; Used by the older non-iframe entry list, which shows the password list only
+  (dispatch [:send-entry-selected db-key entry-uuid @(subscribe [:selection-id]) LIST_KIND_PASSWORD])
   #_(js/chrome.runtime.sendMessage  (clj->js {:message-type ENTRY_SELECTED
                                               :db-key db-key
                                               :entry-uuid entry-uuid})))
@@ -323,14 +335,16 @@
                                          :user-initiated (boolean user-initiated?)}]]}))
 
 ;; Sends a message to the background to get basic entry detail for the selected entry uuid
+;; list-kind tells the background which list the entry was picked from (password or passkey)
 (reg-event-fx
  :send-entry-selected
- (fn [{:keys [db]} [_event-id db-key entry-uuid selection-id]]
+ (fn [{:keys [db]} [_event-id db-key entry-uuid selection-id list-kind]]
    {:db (-> db (assoc-in [:entry-selected-done] true))
     :fx [[:common/send-bg-message-regfx {:message-type ENTRY_SELECTED
                                          :db-key db-key
                                          :selection-id selection-id
-                                         :entry-uuid entry-uuid}]]}))
+                                         :entry-uuid entry-uuid
+                                         :list-kind (or list-kind LIST_KIND_PASSWORD)}]]}))
 
 (reg-event-fx
  :send-get-custom-icon
@@ -398,6 +412,23 @@
    {:db (assoc db :passkey-entries entries)
     :fx [[:execute-message-handler-regfx [(get-in db [:iframe-message-handlers message-type]) nil]]]}))
 
+;; Stores the save-login popup data and calls the registered SHOW_SAVE_LOGIN_POPUP
+;; handler (popup-host/create-save-login-popup). The data has no password
+(reg-event-fx
+ :received-save-login-data
+ (fn [{:keys [db]} [_event-id {:keys [message-type save-login-data]}]]
+   {:db (-> db
+            (assoc :save-login-data save-login-data)
+            (dissoc :save-login-result))
+    :fx [[:execute-message-handler-regfx [(get-in db [:message-handlers message-type]) nil]]]}))
+
+;; Forwards the save result to the save-login popup iframe
+(reg-event-fx
+ :received-save-login-result
+ (fn [{:keys [db]} [_event-id {:keys [save-login-result]}]]
+   {:db (assoc db :save-login-result save-login-result)
+    :fx [[:execute-message-handler-regfx [(get-in db [:iframe-message-handlers SAVE_LOGIN_RESULT]) nil]]]}))
+
 ;; Calls the registered PASSKEY_CREATE_SUCCESS handler (forwards success notification to iframe)
 (reg-event-fx
  :received-passkey-create-success
@@ -438,13 +469,13 @@
     :fx [[:execute-message-handler-regfx [(get-in db [:message-handlers message-type]) nil]]]}))
 
 ;; Called on receiving SHOW_PASSKEY_LIST from the background (WebAuthn get flow).
-;; Stores passkey summaries under the shared :matched-entries key and calls the
-;; registered SHOW_PASSKEY_LIST handler (create-passkey-list-popup).
+;; Stores passkey summaries under their own :passkey-matched-entries key (not the
+;; password list's :matched-entries, so neither list can show the other's entries)
+;; and calls the registered SHOW_PASSKEY_LIST handler (create-passkey-list-popup).
 (reg-event-fx
  :passkey-list-loaded
  (fn [{:keys [db]} [_event-id {:keys [message-type matched-entries]}]]
-   {:db (-> db (assoc-in [:matched-entries] matched-entries)
-               (dissoc :selection-id))
+   {:db (-> db (assoc-in [:passkey-matched-entries] matched-entries))
     :fx [[:execute-message-handler-regfx [(get-in db [:message-handlers message-type]) nil]]]}))
 
 ;; Entry list mui box is hidden (shadow dom host removed)

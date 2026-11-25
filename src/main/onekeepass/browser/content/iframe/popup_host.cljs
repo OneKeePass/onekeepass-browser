@@ -3,8 +3,11 @@
    [applied-science.js-interop :as j]
    [onekeepass.browser.common.frame-security :as frame-security]
    [onekeepass.browser.common.message-type-names :refer [CLOSE_ENTRY_LIST_POPUP
+                                                         LIST_KIND_PASSKEY
+                                                         LIST_KIND_PASSWORD
                                                          CLOSE_PASSKEY_CREATE_POPUP
                                                          CLOSE_POPUP
+                                                         CLOSE_SAVE_LOGIN_POPUP
                                                          CLOSE_SETTINGS_POPUP
                                                          CUSTOM_ICON_LOADED
                                                          PASSKEY_CREATE_SUCCESS
@@ -12,7 +15,10 @@
                                                          RESIZE_IFRAME_MAIN_POPUP
                                                          RESIZE_IFRAME_MSG_POPUP
                                                          RESIZE_IFRAME_PASSKEY_CREATE
+                                                         RESIZE_IFRAME_SAVE_LOGIN
                                                          RESIZE_IFRAME_SETTINGS
+                                                         SAVE_LOGIN_DISMISSED
+                                                         SAVE_LOGIN_RESULT
                                                          SHOW_PASSKEY_ENTRIES
                                                          SHOW_PASSKEY_GROUPS
                                                          SHOW_SETTINGS_POPUP]]
@@ -36,6 +42,8 @@
 (def ^:private ^:constant OKP_PASSKEY_CREATE_TAG_NAME "okp-passkey-create-element")
 
 (def ^:private ^:constant OKP_SETTINGS_TAG_NAME "okp-settings-element")
+
+(def ^:private ^:constant OKP_SAVE_LOGIN_TAG_NAME "okp-save-login-element")
 
 (def ^:private ^:constant OKP_DRAGGBLE_BOX_TAG_NAME  "okp-draggable-box-element")
 
@@ -83,6 +91,16 @@
   []
   (dispatch [:send-passkey-create-cancelled])
   (close-passkey-create-popup))
+
+(defn- close-save-login-popup []
+  (remove-host-element-by-id (form-element-id OKP_SAVE_LOGIN_TAG_NAME)))
+
+(defn- dismiss-save-login-popup
+  "Called when the user closes the save-login popup with the × button: the
+   background drops the captured login"
+  []
+  (dispatch [:send-save-login-message {:message-type SAVE_LOGIN_DISMISSED}])
+  (close-save-login-popup))
 
 (defn- close-settings-popup []
   (remove-host-element-by-id (form-element-id OKP_SETTINGS_TAG_NAME)))
@@ -466,7 +484,7 @@
   (content-iframe-messaging/init-content-iframe-message-channel iframe-element)
 
   ;; Need to send this message with matched entries data to the launched iframe which then shows the mui entry list
-  (content-iframe-messaging/send-matched-entries-loaded-message))
+  (content-iframe-messaging/send-matched-entries-loaded-message LIST_KIND_PASSWORD))
 
 ;; FUTURE (precise anchoring): if the top-left placement feels too detached on many
 ;; sites, anchor under the actual field instead. The sub-frame can read the input rect
@@ -563,8 +581,36 @@
 
     (content-iframe-messaging/init-content-iframe-message-channel iframe-element)
 
-    ;; Sends the passkey entries (stored as :matched-entries in content db) to the iframe
-    (content-iframe-messaging/send-matched-entries-loaded-message)))
+    ;; Sends the passkey entries (stored as :passkey-matched-entries in content db) to the iframe
+    (content-iframe-messaging/send-matched-entries-loaded-message LIST_KIND_PASSKEY)))
+
+(defn create-save-login-popup
+  "Launches the popup offering to save (add or update) a login the user just
+   submitted on this site. Shown at the top right like the passkey popup"
+  []
+  (remove-host-element-by-id (form-element-id OKP_SAVE_LOGIN_TAG_NAME))
+  (let [{:keys [host-element iframe-element handle-element]}
+        (create-popup-internal {:iframe-src       "save_login_popup.html"
+                                :tag-name         OKP_SAVE_LOGIN_TAG_NAME
+                                :box-width        POPUP_ACTION_BOX_WIDTH
+                                :close-popup      dismiss-save-login-popup
+                                :dragging-support true})]
+
+    (dragging-support/add-drag-support host-element iframe-element handle-element)
+
+    (iframe-resize-message-listener
+     {:iframe-element iframe-element
+      :handle-element handle-element
+      :message-type   RESIZE_IFRAME_SAVE_LOGIN})
+
+    (content-iframe-messaging/register-iframe-message-handlers
+     {CLOSE_SAVE_LOGIN_POPUP close-save-login-popup
+      SAVE_LOGIN_RESULT      content-iframe-messaging/send-save-login-result-message})
+
+    (content-iframe-messaging/init-content-iframe-message-channel iframe-element)
+
+    ;; Sends status, site, username and the save choices (no password) to the iframe
+    (content-iframe-messaging/send-save-login-data-message)))
 
 (defn create-passkey-create-popup
   "Launches the passkey creation popup for the WebAuthn create (registration) flow.

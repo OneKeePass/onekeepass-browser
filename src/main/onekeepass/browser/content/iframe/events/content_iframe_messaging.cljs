@@ -8,10 +8,13 @@
    [onekeepass.browser.common.message-type-names :refer [CLOSE_ENTRY_LIST_POPUP
                                                          CLOSE_PASSKEY_CREATE_POPUP
                                                          CLOSE_POPUP
+                                                         CLOSE_SAVE_LOGIN_POPUP
                                                          CLOSE_SETTINGS_POPUP
                                                          CUSTOM_ICON_LOADED
                                                          ENTRY_SELECTED
                                                          GET_CUSTOM_ICON
+                                                         LIST_KIND_PASSKEY
+                                                         LIST_KIND_PASSWORD
                                                          PASSKEY_CREATE_CANCELLED
                                                          PASSKEY_CREATE_CONFIRMED
                                                          PASSKEY_CREATE_FALLBACK
@@ -19,10 +22,15 @@
                                                          PASSKEY_DB_CHOSEN
                                                          PASSKEY_GROUP_CHOSEN
                                                          POPUP_ACTION
+                                                         SAVE_LOGIN_CONFIRMED
+                                                         SAVE_LOGIN_DISMISSED
+                                                         SAVE_LOGIN_NEVER_FOR_SITE
+                                                         SAVE_LOGIN_RESULT
                                                          SHOW_ENTRY_LIST
                                                          SHOW_PASSKEY_CREATE_POPUP
                                                          SHOW_PASSKEY_ENTRIES
                                                          SHOW_PASSKEY_GROUPS
+                                                         SHOW_SAVE_LOGIN_POPUP
                                                          SHOW_SETTINGS_POPUP]]
    [onekeepass.browser.common.utils :as u]
    [onekeepass.browser.content.iframe.events.content-iframe-connection :as content-iframe-conn]
@@ -95,7 +103,7 @@
       
       ENTRY_SELECTED
       (dispatch [:send-entry-selected (:db-key message-data) (:entry-uuid message-data)
-                 (:selection-id message-data)])
+                 (:selection-id message-data) (:list-kind message-data)])
 
       GET_CUSTOM_ICON
       (dispatch [:send-get-custom-icon (:db-key message-data) (:custom-icon-uuid message-data)])
@@ -122,6 +130,27 @@
       (do
         (dispatch [:execute-iframe-message-type {:message-type CLOSE_PASSKEY_CREATE_POPUP}])
         (dispatch [:send-passkey-create-fallback]))
+
+      ;; Save-login popup: the user's choice goes to the background. Only the
+      ;; choice is relayed; the background holds the captured login itself
+      SAVE_LOGIN_CONFIRMED
+      (dispatch [:send-save-login-message
+                 (merge {:message-type SAVE_LOGIN_CONFIRMED}
+                        (select-keys message-data [:choice :db-key :entry-uuid :group-uuid :title]))])
+
+      SAVE_LOGIN_DISMISSED
+      (do
+        (dispatch [:execute-iframe-message-type {:message-type CLOSE_SAVE_LOGIN_POPUP}])
+        (dispatch [:send-save-login-message {:message-type SAVE_LOGIN_DISMISSED}]))
+
+      SAVE_LOGIN_NEVER_FOR_SITE
+      (do
+        (dispatch [:execute-iframe-message-type {:message-type CLOSE_SAVE_LOGIN_POPUP}])
+        (dispatch [:send-save-login-message {:message-type SAVE_LOGIN_NEVER_FOR_SITE}]))
+
+      ;; Save-login popup closes itself after showing the result
+      CLOSE_SAVE_LOGIN_POPUP
+      (dispatch [:execute-iframe-message-type message-data])
 
       ;; Main popup requests settings popup to open
       SHOW_SETTINGS_POPUP
@@ -158,12 +187,23 @@
   (dispatch [:content-iframe/received-msg-box-message]))
 
 (defn send-matched-entries-loaded-message
-  "Called to send the matched entries data from content script to iframe after the launch of the 'entry_list_popup.html' iframe"
-  []
-  (dispatch [:content-iframe/matched-entries-loaded]))
+  "Called to send the matched entries data from content script to iframe after the launch of the 'entry_list_popup.html' iframe.
+   list-kind is LIST_KIND_PASSWORD or LIST_KIND_PASSKEY: which list the popup shows"
+  [list-kind]
+  (dispatch [:content-iframe/matched-entries-loaded list-kind]))
 
 (defn send-custom-icon-loaded-message [message-data]
   (dispatch [:content-iframe/custom-icon-loaded message-data]))
+
+(defn send-save-login-data-message
+  "Called to send the save-login data (stored as :save-login-data in content db) to the save-login popup iframe after launch"
+  []
+  (dispatch [:content-iframe/save-login-data]))
+
+(defn send-save-login-result-message
+  "Called to forward the save result (stored as :save-login-result in content db) to the save-login popup iframe"
+  []
+  (dispatch [:content-iframe/save-login-result]))
 
 (defn send-passkey-create-data-message
   "Called to send databases + rp-name to the passkey creation popup iframe after launch"
@@ -211,11 +251,18 @@
      {:fx [[:common/send-iframe-message-regfx message-data]]})))
 
 ;; SHOW_ENTRY_LIST from bg -> content -> iframe
+;; The password and passkey lists are kept apart in the content db; the iframe gets
+;; the one for its list-kind and echoes the kind back with ENTRY_SELECTED
 (reg-event-fx
  :content-iframe/matched-entries-loaded
- (fn [{:keys [db]} [_event-id]]
-   (let [message-data (select-keys db [:matched-entries :fill-target-origin :top-origin :selection-id])
-         message-data (merge {:message-type SHOW_ENTRY_LIST} message-data)]
+ (fn [{:keys [db]} [_event-id list-kind]]
+   (let [message-data (if (= list-kind LIST_KIND_PASSKEY)
+                        ;; No selection-id: that binds a password-list pick to its frame
+                        {:matched-entries (get db :passkey-matched-entries)}
+                        (select-keys db [:matched-entries :fill-target-origin :top-origin :selection-id]))
+         message-data (merge {:message-type SHOW_ENTRY_LIST
+                              :list-kind (if (= list-kind LIST_KIND_PASSKEY) LIST_KIND_PASSKEY LIST_KIND_PASSWORD)}
+                             message-data)]
      #_(u/okp-println "Sending entries data of SHOW_ENTRY_LIST" message-data "to iframe")
      {:fx [[:common/send-iframe-message-regfx message-data]]})))
 
@@ -223,6 +270,26 @@
  :content-iframe/custom-icon-loaded
  (fn [{:keys [_db]} [_event-id message-data]]
    {:fx [[:common/send-iframe-message-regfx message-data]]}))
+
+;; SHOW_SAVE_LOGIN_POPUP from bg -> content -> iframe
+(reg-event-fx
+ :content-iframe/save-login-data
+ (fn [{:keys [db]} [_event-id]]
+   {:fx [[:common/send-iframe-message-regfx {:message-type SHOW_SAVE_LOGIN_POPUP
+                                             :save-login-data (get db :save-login-data)}]]}))
+
+;; SAVE_LOGIN_RESULT from bg -> content -> iframe
+(reg-event-fx
+ :content-iframe/save-login-result
+ (fn [{:keys [db]} [_event-id]]
+   {:fx [[:common/send-iframe-message-regfx {:message-type SAVE_LOGIN_RESULT
+                                             :save-login-result (get db :save-login-result)}]]}))
+
+;; iframe -> content -> bg
+(reg-event-fx
+ :send-save-login-message
+ (fn [{:keys [_db]} [_event-id message-data]]
+   {:fx [[:common/send-bg-message-regfx message-data]]}))
 
 ;; SHOW_PASSKEY_CREATE_POPUP from bg -> content -> iframe
 (reg-event-fx

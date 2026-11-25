@@ -7,11 +7,13 @@
                                                          POPUP_ACTION
                                                          REDETECT_FIELDS
                                                          SELECTED_ENTRY_DETAIL
+                                                         SHOW_SAVE_LOGIN_POPUP
                                                          SHOW_ENTRY_LIST
                                                          SHOW_PASSKEY_CREATE_POPUP
                                                          SHOW_PASSKEY_GROUPS
                                                          SHOW_PASSKEY_LIST]]
    [onekeepass.browser.common.utils :as u :refer [is-firefox-browser?]]
+   [onekeepass.browser.content.credential-capture :as credential-capture]
    [onekeepass.browser.content.events.messaging :as messaging-event]
    [onekeepass.browser.content.events.popup] ;;[onekeepass.browser.content.form-fields-2 :as form-fields]
    [onekeepass.browser.content.form-fields :as form-fields]
@@ -68,7 +70,14 @@
    {REDETECT_FIELDS form-fields/identify-page
 
     SHOW_ENTRY_LIST popup-host/create-entry-list-popup
-    SELECTED_ENTRY_DETAIL form-fields/fill-inputs})
+    SELECTED_ENTRY_DETAIL form-fields/fill-inputs
+
+    ;; Offer to save a login submitted on this site (see credential-capture)
+    SHOW_SAVE_LOGIN_POPUP popup-host/create-save-login-popup})
+
+  ;; Notices login / signup / change-password submits so the background can offer
+  ;; to save them. Not installed on sites the user disabled
+  (credential-capture/install!)
 
   ;; Register to observe any div or form nodes added dynamically that may carry
   ;; the login fields. Debounced + gated (detect-on-mutation) so a churny but

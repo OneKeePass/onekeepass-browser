@@ -83,6 +83,27 @@
 
 (def REDETECT_FIELDS "REDETECT_FIELDS")
 
+;; Which list an entry-list popup shows. Sent with SHOW_ENTRY_LIST / SHOW_PASSKEY_LIST
+;; and echoed back with ENTRY_SELECTED, so a pick in the password list always fills a
+;; password and a pick in the passkey list always completes the passkey sign-in,
+;; whatever else is pending in the tab.
+(def LIST_KIND_PASSWORD "password")
+(def LIST_KIND_PASSKEY "passkey")
+
+;; Saving a submitted login — content → background
+(def CREDENTIAL_SUBMITTED "CREDENTIAL_SUBMITTED")                   ;; username + password submitted on the page
+(def CREDENTIAL_USERNAME_SUBMITTED "CREDENTIAL_USERNAME_SUBMITTED") ;; username step of a two-step login
+(def CREDENTIAL_FORM_GONE "CREDENTIAL_FORM_GONE")                   ;; the submitted password field went away (SPA login succeeded)
+
+;; Save-login popup — background → content → iframe, and back
+(def SHOW_SAVE_LOGIN_POPUP "SHOW_SAVE_LOGIN_POPUP")
+(def CLOSE_SAVE_LOGIN_POPUP "CLOSE_SAVE_LOGIN_POPUP")
+(def RESIZE_IFRAME_SAVE_LOGIN "RESIZE_IFRAME_SAVE_LOGIN")
+(def SAVE_LOGIN_CONFIRMED "SAVE_LOGIN_CONFIRMED")         ;; iframe→content→bg: user chose add / update
+(def SAVE_LOGIN_DISMISSED "SAVE_LOGIN_DISMISSED")         ;; iframe→content→bg: user closed the popup
+(def SAVE_LOGIN_NEVER_FOR_SITE "SAVE_LOGIN_NEVER_FOR_SITE") ;; iframe→content→bg: do not offer again on this site
+(def SAVE_LOGIN_RESULT "SAVE_LOGIN_RESULT")               ;; bg→content→iframe: saved, or why not
+
 (def RECONNECT_APP "RECONNECT_APP")
 
 ;; Message types for content <-> iframe communication
